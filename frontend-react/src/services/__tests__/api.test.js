@@ -88,6 +88,20 @@ describe('updateInstanceConfig', () => {
     });
   });
 
+  it('sends the admin list when present, including an empty one', async () => {
+    mocks.put.mockResolvedValue({ data: { message: 'ok' } });
+    const admins = [{ steam_id64: '76561198087654321', level: 4 }];
+
+    await updateInstanceConfig(7, { configs: {}, admins }, false);
+    expect(mocks.put.mock.calls[0][1].admins).toEqual(admins);
+
+    await updateInstanceConfig(7, { configs: {}, admins: [] }, false);
+    expect(mocks.put.mock.calls[1][1].admins).toEqual([]);
+
+    await updateInstanceConfig(7, { configs: {} }, false);
+    expect(mocks.put.mock.calls[2][1]).not.toHaveProperty('admins');
+  });
+
   it('passes explicit config maps and metadata through unchanged', async () => {
     mocks.put.mockResolvedValue({ data: { message: 'ok' } });
 

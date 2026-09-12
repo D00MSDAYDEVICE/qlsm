@@ -325,6 +325,7 @@ export const updateInstanceConfig = async (instanceId, configData, restart = tru
       checked_plugins,
       lan_rate_enabled,
       enabled_hooks,
+      admins,
       name,
       hostname,
       ...configs
@@ -359,6 +360,10 @@ export const updateInstanceConfig = async (instanceId, configData, restart = tru
     }
     if (enabled_hooks !== undefined) {
       payload.enabled_hooks = enabled_hooks;
+    }
+    // Absent means "admin list untouched"; an empty array revokes everyone.
+    if (admins !== undefined) {
+      payload.admins = admins;
     }
     const response = await apiClient.put(`/instances/${instanceId}/config`, payload);
     return response.data; // Assuming API returns { "message": "..." }
