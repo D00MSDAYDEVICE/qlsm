@@ -503,7 +503,8 @@ def _validate_admins_payload(data):
     from what the config-save path produces and propagates into instance
     rows.
     """
-    if 'admins' not in data:
+    # null is the editors' "no admin list known" (tab never loaded) -- same as absent.
+    if data.get('admins') is None:
         return None, None
     return validate_admin_entries(data['admins'])
 

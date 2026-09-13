@@ -1746,6 +1746,19 @@ def test_preset_without_admins_json_reports_null_not_an_empty_list(client, app):
     assert client.get(f'/api/presets/{preset_id}', headers=headers).get_json()['data']['admins'] is None
 
 
+def test_preset_accepts_null_admins_as_no_list(client, app):
+    """The editors send admins: null when the Owner & Admins tab never loaded."""
+    headers = auth_headers(app, DEFAULT_USER)
+    create = client.post('/api/presets/', json={
+        'name': 'null-admins',
+        'configs': dict(BASE_CONFIG_MAP),
+        'admins': None,
+    }, headers=headers)
+    assert create.status_code in (200, 201), create.get_json()
+    preset_id = create.get_json()['data']['id']
+    assert client.get(f'/api/presets/{preset_id}', headers=headers).get_json()['data']['admins'] is None
+
+
 def test_preset_update_round_trips_admins(client, app):
     """admins must be settable via PUT too, and appear in the update response."""
     headers = auth_headers(app, DEFAULT_USER)
