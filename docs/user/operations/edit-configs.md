@@ -21,17 +21,18 @@ The **Owner & Admins** tab, to the right of **Hooks**, lets you assign people
 from the [Operators](../administration/operators.md) directory without
 hand-editing `server.cfg` or `access.txt`. Pick an **Owner** to write
 `qlx_owner`, or add an operator as an **Admin** with a level from 1 to 5.
-Redis, not `access.txt`, is the source of truth for admin levels — see
-[Row States](../administration/operators.md#row-states) for what each row's
-badge means and how to change or revoke a level.
+The admin list is read straight from the server's minqlx Redis database as
+soon as the window opens, so it includes anyone promoted in-game with
+`!setperm`. See [Operators](../administration/operators.md#assign-owner-or-admin).
 
 ![Owner & Admins panel](../images/owner-admins-panel.png)
 
-When you click **Save Configuration**, QLSM also pushes the admin list into
-the running server's minqlx permissions. They can take up to about 30 seconds
-to apply. Removing an admin sets their in-game level back to 0. If the push
-fails, a warning appears in the instance log. See
-[What Happens In-Game](../administration/operators.md#what-happens-in-game).
+When you click **Save Configuration**, QLSM writes only the admins you changed
+in the tab: an added admin gets their level, a removed one goes back to 0.
+Everyone else on the server is left alone, and nothing is re-applied on later
+saves or restarts. Changes can take up to about 30 seconds to apply in-game. If
+the write fails, a warning appears in the instance log. See
+[What Happens When You Save](../administration/operators.md#what-happens-when-you-save).
 
 Any numeric `steamid|level` line left in `access.txt` from an older QLSM
 version is stripped out automatically whenever the file is saved — Quake
