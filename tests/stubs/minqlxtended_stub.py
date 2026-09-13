@@ -1,6 +1,6 @@
 """A fake `minqlxtended` module, enough to import and exercise a ported plugin.
 
-Mirrors the pinned engine at 97fbe671 (v1.0.2): StrEnum team/state/gametype, a Plugin base
+Mirrors the pinned engine at 411591a2 (v1.1.0): StrEnum team/state/gametype, a Plugin base
 with add_hook/get_cvar/players/db/logger, and a pass-through @thread decorator.
 Event arities are taken from _events.py so a handler with a stale signature
 raises here exactly as the engine would raise at plugin load.
