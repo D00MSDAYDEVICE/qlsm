@@ -8,7 +8,10 @@ import { getInstanceAdmins } from '../../services/api';
 // prop reference -> new memo array -> effect again) and it would also mark the
 // modal dirty on open and send an empty admin list on a save that raced the
 // initial GET, revoking everyone.
-export default function useInstanceAdmins({ instanceId, active, entries, onChange, onLoaded }) {
+// `preload`, when given, is an in-flight getInstanceAdmins promise the parent
+// started earlier (Edit Configuration starts it on open). The first load awaits
+// it instead of making its own SSH round trip; Refresh always refetches.
+export default function useInstanceAdmins({ instanceId, active, entries, onChange, onLoaded, preload = null }) {
   const [stored, setStored] = useState([]);
   const [live, setLive] = useState(null);
   const [managed, setManaged] = useState(null);
@@ -26,11 +29,11 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
   // Refresh replaces server state only. The user's pending edits live in the
   // parent and are deliberately untouched: Refresh shows in-game changes, it is
   // not a discard button.
-  const load = useCallback(async () => {
+  const load = useCallback(async (pending = null) => {
     if (!instanceId) return;
     setLoading(true);
     try {
-      const data = await getInstanceAdmins(instanceId);
+      const data = await (pending || getInstanceAdmins(instanceId));
       setStored(data.stored || []);
       setLive(data.live ?? null);
       setManaged(data.managed ?? null);
@@ -47,7 +50,7 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
     }
   }, [instanceId]);
 
-  useEffect(() => { if (active) load(); }, [active, load]);
+  useEffect(() => { if (active) load(preload); }, [active, load, preload]);
 
   const storedEntries = useMemo(
     () => (stored || []).map((row) => ({ steam_id64: row.steam_id64, level: row.level })),
@@ -110,7 +113,7 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
     rows,
     loading,
     liveError,
-    refresh: load,
+    refresh: () => load(),
     addAdmin,
     removeAdmin,
     adoptAdmin,

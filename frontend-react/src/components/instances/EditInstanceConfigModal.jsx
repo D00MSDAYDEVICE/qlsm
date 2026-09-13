@@ -225,26 +225,30 @@ function EditInstanceConfigModal({
   // What the server currently has, for "Save as preset" on an untouched list.
   // Never passed back into OwnerAdminEditor.
   const [loadedAdminEntries, setLoadedAdminEntries] = useState(null);
+  // The admin read (an SSH round trip) starts the moment the modal opens and
+  // runs alongside the config load without holding up the spinner. The
+  // Owner & Admins tab and Save Preset both await this same request.
+  const [adminsPreload, setAdminsPreload] = useState(null);
 
   const handleAdminEntriesChange = useCallback((next) => {
     setAdminEntries(next);
     setIsDirty(true);
   }, []);
 
-  // Admin list for a preset: the edited list, else what the modal preloaded.
-  // A preset saved before that preload returns fetches the stored list itself,
-  // so the preset never silently drops admins. null only if that fetch fails.
+  // Admin list for a preset: the edited list, else what the tab loaded, else
+  // the stored list from the read started on open (awaited if still running),
+  // so the preset never silently drops admins. null only if that read fails.
   const resolvePresetAdmins = useCallback(async () => {
     if (adminEntries !== null) return adminEntries;
     if (loadedAdminEntries !== null) return loadedAdminEntries;
     if (!instanceId) return null;
     try {
-      const data = await getInstanceAdmins(instanceId);
+      const data = await (adminsPreload || getInstanceAdmins(instanceId));
       return (data.stored || []).map((r) => ({ steam_id64: r.steam_id64, level: r.level }));
     } catch {
       return null;
     }
-  }, [adminEntries, instanceId, loadedAdminEntries]);
+  }, [adminEntries, adminsPreload, instanceId, loadedAdminEntries]);
 
   // Resolve raw qlx_plugins names to full tree paths once on initial load.
   // Only root-level files can match — a name that resolves solely to a
@@ -335,6 +339,9 @@ function EditInstanceConfigModal({
   useEffect(() => {
     if (isOpen && instanceId) {
       let cancelled = false;
+      const preload = getInstanceAdmins(instanceId);
+      preload.catch(() => {}); // awaited later; never an unhandled rejection
+      setAdminsPreload(preload);
       setCurrentInstanceName(initialInstanceName || `Instance ${instanceId}`);
       const fetchInitialData = async () => {
         setLoading(true);
@@ -1232,6 +1239,7 @@ function EditInstanceConfigModal({
                               adminEntries={adminEntries}
                               onAdminEntriesChange={handleAdminEntriesChange}
                               onAdminEntriesLoaded={setLoadedAdminEntries}
+                              adminsPreload={adminsPreload}
                             />
                           </div>
                         </div>

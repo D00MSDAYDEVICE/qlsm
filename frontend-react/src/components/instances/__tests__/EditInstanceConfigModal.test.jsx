@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   downloadPreset: vi.fn(),
   flushEdits: vi.fn(),
   fetchInstanceHooks: vi.fn(),
+  getInstanceAdmins: vi.fn(),
   getBinaryMeta: vi.fn(),
   getFactoryContent: vi.fn(),
   getFactoryTree: vi.fn(),
@@ -54,6 +55,7 @@ vi.mock('../../../services/api', () => ({
   getFactoryContent: mocks.getFactoryContent,
   getFactoryTree: mocks.getFactoryTree,
   fetchInstanceHooks: mocks.fetchInstanceHooks,
+  getInstanceAdmins: mocks.getInstanceAdmins,
   getInstanceById: mocks.getInstanceById,
   getInstanceConfig: mocks.getInstanceConfig,
   getPresetById: mocks.getPresetById,
@@ -330,6 +332,7 @@ describe('EditInstanceConfigModal preset saving', () => {
     mocks.createPreset.mockResolvedValue({ message: 'saved', data: { id: 42, name: 'saved-from-edit' } });
     mocks.downloadPreset.mockResolvedValue(new Blob(['zip-bytes'], { type: 'application/zip' }));
     mocks.flushEdits.mockResolvedValue(undefined);
+    mocks.getInstanceAdmins.mockResolvedValue({ stored: [], live: {}, managed: [], live_error: null });
     mocks.fetchInstanceHooks.mockResolvedValue({
       available: [
         { filename: 'a.so', size: 1, modified: 1, enabled: true, order: 1, description: '' },
@@ -402,6 +405,31 @@ describe('EditInstanceConfigModal preset saving', () => {
         checked_factories: [],
       })
     );
+  });
+
+  it('shows the modal while the admin read is still running and the preset waits for it', async () => {
+    let finishAdmins;
+    mocks.getInstanceAdmins.mockReturnValue(new Promise((resolve) => { finishAdmins = resolve; }));
+    mocks.getInstanceById.mockResolvedValue({
+      host_name: 'test-host', host_os_type: 'debian', status: 'running', name: 'inst', qlx_plugins: '',
+    });
+
+    render(
+      <EditInstanceConfigModal isOpen={true} onClose={vi.fn()} instanceId={1} instanceName="Test123" onConfigSaved={vi.fn()} />
+    );
+
+    // Started on open, and the spinner does not wait for it.
+    expect(mocks.getInstanceAdmins).toHaveBeenCalledWith(1);
+    await waitFor(() => expect(screen.getByRole('button', { name: /save preset/i })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /save preset/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm save preset/i }));
+    expect(mocks.createPreset).not.toHaveBeenCalled();
+
+    finishAdmins({ stored: [{ steam_id64: '76561198012345678', level: 4 }], live: {}, managed: [], live_error: null });
+    await waitFor(() => expect(mocks.createPreset).toHaveBeenCalledTimes(1));
+    expect(mocks.createPreset.mock.calls[0][0].admins).toEqual([{ steam_id64: '76561198012345678', level: 4 }]);
+    expect(mocks.getInstanceAdmins).toHaveBeenCalledTimes(1);
   });
 
   it('includes lan_rate_enabled when saving a preset from edit mode', async () => {

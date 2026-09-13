@@ -193,3 +193,17 @@ it('does not read live state when inactive', async () => {
     { steamId: '76561198012345678', level: 2, state: 'unknown' },
   ]);
 });
+
+it('awaits a preload promise instead of fetching, and Refresh refetches', async () => {
+  const preload = Promise.resolve({
+    stored: [{ steam_id64: '76561198012345678', level: 3 }], live: {}, managed: [], live_error: null,
+  });
+  const { result } = renderHook(() => useInstanceAdmins({
+    instanceId: 1, active: true, entries: null, onChange: () => {}, preload,
+  }));
+  await waitFor(() => expect(result.current.rows).toHaveLength(1));
+  expect(getInstanceAdmins).not.toHaveBeenCalled();
+
+  await act(async () => { await result.current.refresh(); });
+  expect(getInstanceAdmins).toHaveBeenCalledWith(1);
+});

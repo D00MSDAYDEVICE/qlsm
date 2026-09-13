@@ -19,6 +19,7 @@ function OwnerAdminEditor({
   adminEntries = null,
   onAdminEntriesChange,
   onAdminEntriesLoaded,
+  adminsPreload = null,
 }) {
   const [operators, setOperators] = useState([]);
   const [pendingAdmin, setPendingAdmin] = useState('');
@@ -49,9 +50,9 @@ function OwnerAdminEditor({
   // The parent owns the list: it passes adminEntries in and the hook's mutators
   // call onAdminEntriesChange. Nothing is mirrored upward from an effect -- that
   // loops forever and marks the modal dirty on open.
-  // Reads as soon as the editor mounts, even behind a hidden tab: the modal
-  // keeps it mounted so the tab opens already filled and Save Preset has the
-  // admin list without the tab ever being shown.
+  // Reads as soon as the editor mounts, even behind a hidden tab, so the tab
+  // opens already filled. `adminsPreload` is the request Edit Configuration
+  // started on open; awaiting it avoids a second SSH read.
   const {
     rows, loading, liveError, refresh, addAdmin, removeAdmin, adoptAdmin,
   } = useInstanceAdmins({
@@ -60,6 +61,7 @@ function OwnerAdminEditor({
     entries: adminEntries,
     onChange: onAdminEntriesChange,
     onLoaded: onAdminEntriesLoaded,
+    preload: adminsPreload,
   });
 
   const operatorsById = useMemo(() => {
