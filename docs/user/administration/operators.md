@@ -30,9 +30,8 @@ Each SteamID64 can only be in the directory once.
 2. Click the delete icon on the operator's row and confirm.
 
 Deleting an operator only removes them from the directory. It does **not**
-remove them from any server: an existing `qlx_owner` line or stored Admin
-row with their SteamID64 stays in place, and so does their in-game
-permission. To take someone's access away, remove them in the Owner &
+remove them from any server: an existing `qlx_owner` line with their
+SteamID64 stays in place, and so does their in-game permission. To take someone's access away, remove them in the Owner &
 Admins tab and save.
 
 ## Assign Owner Or Admin
@@ -54,10 +53,10 @@ Higher levels unlock more minqlx admin commands. Level **5** is the highest
 and includes `!setperm`, which lets that admin grant permissions to other
 players, so only give 5 to people you trust with that.
 
-Redis — minqlx's own permission database on the running server — is the
-source of truth for who is an admin and at what level. QLSM keeps its own
-list per instance and reapplies it after every deploy or config save, so a
-rebuilt host or a wiped Redis database gets its admins back.
+The admin list lives only on the game server, in minqlx's own Redis
+permission database. The tab shows exactly what the server has right now,
+including anyone promoted in-game with `!setperm`. QLSM keeps no copy of
+its own.
 
 The **Manage operators** link opens **Settings → Operators** in a new tab.
 
@@ -72,65 +71,45 @@ SteamID and current level already filled in. Enter a name and click **Add
 Operator**; the row then shows that name. Your unsaved configuration edits
 are not affected.
 
-## Row States
+## What Happens When You Save
 
-Each row in the Admins list carries a badge that says how QLSM's stored list
-compares to what the server actually has:
-
-- **Managed** — stored in QLSM and matching the level on the server.
-- **Not applied yet** — stored in QLSM, but the server has a different level
-  (or none yet). Clears to **Managed** after the next save.
-- **Set in-game** — a level on the server with no matching QLSM row: someone
-  ran `!setperm` in-game, or this is an admin from another instance that
-  shares the same Redis database.
-- **Will be revoked on save** — a level on the server that *is* in QLSM's
-  managed set but has lost its stored row, so the next save will reset it to
-  0. Click **Adopt** to keep the grant instead.
-- **No badge at all** — QLSM could not read the server (unreachable host,
-  nothing deployed yet, or no instance, as on the Add Instance form). A
-  banner above the list explains why. Managed rows always carry a badge, so a
-  bare row unambiguously means "unknown," never "definitely not an admin."
-
-**Set in-game** and **Will be revoked on save** rows have no **Remove**
-button — there is no stored row to delete. Click **Adopt** first to give the
-grant a stored row, then remove it normally if you want it gone.
-
-There is no inline level editor in this first cut: to change someone's level,
-remove them and add them back at the new level.
-
-## What Happens In-Game
-
-Levels apply on **Save Configuration** (and after a fresh deploy) without a
-server restart, though minqlx's own permission cache can take up to about 30
-seconds to pick up the change.
+**Save Configuration** writes only what you changed in the tab. Admins you
+didn't touch, including anyone promoted in-game while the window was open,
+are left alone. Nothing is re-applied on later saves, restarts or deploys, so
+a change made in-game with `!setperm` stays and shows up the next time you
+open the tab.
 
 - **Adding** an admin gives them that level in-game.
-- **Removing** an admin sets their in-game level back to 0 on the next save.
-- **Players promoted in-game** with `!setperm`, and never added through
-  QLSM, are left alone (shown as **Set in-game**).
+- **Removing** an admin sets their in-game level to 0.
+- Changes apply without a server restart, though minqlx's permission cache
+  can take up to about 30 seconds to pick them up.
+
+There is no inline level editor: to change someone's level, remove them and
+add them back at the new level.
 
 Instances that share a Redis database also share in-game admins: an admin
-added on one instance is an admin on the other. If both instances list the
-same SteamID, **the last instance saved wins** — QLSM does not detect or warn
-about the conflict.
+added on one instance is an admin on the other.
 
-Presets store an `admins.json` file. Nothing is applied in-game until an
-instance using the preset is saved.
+### Presets
 
-### If The Push Fails
+A preset stores the admin list in an `admins.json` file. **Save Preset**
+takes the list the server currently has (plus your unsaved edits), even if you
+never opened the tab. A new instance created from the preset gets those admins
+once, when it's deployed. Loading a preset into an existing instance replaces
+the tab's list; save to apply the difference.
 
-If QLSM can't reach the server (for example, SSH or Redis is down), the
-config is still saved, but the instance log shows a warning and the Owner &
-Admins tab shows no per-row badges with a banner explaining the server
-couldn't be read. In-game permissions stay as they were until the next
-successful save. Check the instance log, and save again once the server is
-reachable.
+### If The Server Can't Be Read
+
+If QLSM can't reach the server (for example, SSH or Redis is down), the tab
+shows a banner and the admin list can't be edited. **Save Preset** still
+saves, but without admins, and tells you so. If a save can't write your admin
+changes, the config is still saved and the instance log shows a warning.
 
 ## access.txt
 
 `access.txt` is Quake Live's own file — it only holds Quake Live's native
 `admin`, `mod` and `ban` role lines. It no longer holds QLSM admin levels:
-those live in QLSM's database and in minqlx's Redis permissions, not on disk.
+those live in minqlx's Redis permissions on the server, not on disk.
 Any numeric `steamid|level` line left over from an older QLSM version is
 stripped out automatically the next time the file is saved, whether from an
 instance or a preset.

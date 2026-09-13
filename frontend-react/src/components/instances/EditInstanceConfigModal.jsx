@@ -22,6 +22,7 @@ import { qlworkshopLanguage } from '../../codemirror-lang-qlworkshop';
 import { qlentLanguage, qlentLinter } from '../../codemirror-lang-qlent';
 import HooksTab from './HooksTab';
 import OwnerAdminEditor from '../operators/OwnerAdminEditor';
+import { diffAdminLists } from '../../utils/adminChanges';
 import {
   canEnableLanRate,
   getLanRateUnsupportedMessage,
@@ -235,20 +236,27 @@ function EditInstanceConfigModal({
     setIsDirty(true);
   }, []);
 
-  // Admin list for a preset: the edited list, else what the tab loaded, else
-  // the stored list from the read started on open (awaited if still running),
-  // so the preset never silently drops admins. null only if that read fails.
+  // Admin list for a preset: the edited list, else the server's list -- from
+  // the tab if it has loaded, else from the read started on open (awaited if
+  // still running). null when the server could not be read; the preset is
+  // then saved without admins and the user is told.
   const resolvePresetAdmins = useCallback(async () => {
     if (adminEntries !== null) return adminEntries;
     if (loadedAdminEntries !== null) return loadedAdminEntries;
     if (!instanceId) return null;
     try {
       const data = await (adminsPreload || getInstanceAdmins(instanceId));
-      return (data.stored || []).map((r) => ({ steam_id64: r.steam_id64, level: r.level }));
+      return Array.isArray(data?.admins) ? data.admins : null;
     } catch {
       return null;
     }
   }, [adminEntries, adminsPreload, instanceId, loadedAdminEntries]);
+
+  const warnIfPresetHasNoAdmins = useCallback((admins) => {
+    if (admins === null && instanceId) {
+      showError('Preset saved without admins: the admin list could not be read from the server.');
+    }
+  }, [instanceId, showError]);
 
   // Resolve raw qlx_plugins names to full tree paths once on initial load.
   // Only root-level files can match — a name that resolves solely to a
@@ -731,13 +739,14 @@ function EditInstanceConfigModal({
         name: savedPreset.name || name.trim(),
       });
       showSuccess(response.message || `Preset "${name}" saved successfully.`);
+      warnIfPresetHasNoAdmins(presetData.admins);
     } catch (err) {
       setPresetError(err.error?.message || err.message || 'Failed to save preset.');
       showError('Failed to save preset.');
     } finally {
       setIsSavingPreset(false);
     }
-  }, [checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, pluginDraftId, resolvePresetAdmins, serializeConfigs, serializeFactories, showSuccess, showError]);
+  }, [checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, pluginDraftId, resolvePresetAdmins, serializeConfigs, serializeFactories, showSuccess, showError, warnIfPresetHasNoAdmins]);
 
   const handleOverwritePreset = useCallback(async (presetId, { description, runtime }) => {
     setIsSavingPreset(true);
@@ -772,13 +781,14 @@ function EditInstanceConfigModal({
       const saved = response.data || {};
       setSavedPresetForDownload({ id: saved.id ?? presetId, name: saved.name });
       showSuccess(response.message || 'Preset overwritten successfully.');
+      warnIfPresetHasNoAdmins(presetData.admins);
     } catch (err) {
       setPresetError(err.error?.message || err.message || 'Failed to overwrite preset.');
       showError('Failed to overwrite preset.');
     } finally {
       setIsSavingPreset(false);
     }
-  }, [checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, pluginDraftId, resolvePresetAdmins, serializeConfigs, serializeFactories, showSuccess, showError]);
+  }, [checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, pluginDraftId, resolvePresetAdmins, serializeConfigs, serializeFactories, showSuccess, showError, warnIfPresetHasNoAdmins]);
 
   const handlePresetDeleted = useCallback((deletedPresetId) => {
     setPresets(prevPresets => prevPresets.filter(p => p.id !== deletedPresetId));
@@ -834,10 +844,11 @@ function EditInstanceConfigModal({
       if (hooksLoaded) {
         configPayload.enabled_hooks = hookEnabledOrder;
       }
-      // Only when the user actually edited it. An empty list is an instruction to
-      // revoke everyone, so an untouched list must not be sent at all.
+      // Only what the user changed against the list read from the server; every
+      // other admin in Redis (e.g. set in-game with !setperm) is left alone.
       if (adminEntries !== null) {
-        configPayload.admins = adminEntries;
+        const adminChanges = diffAdminLists(loadedAdminEntries, adminEntries);
+        if (adminChanges.length > 0) configPayload.admin_changes = adminChanges;
       }
 
       // Pass restart parameter to updateInstanceConfig

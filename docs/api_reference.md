@@ -1071,37 +1071,35 @@ The directory behind the Owner & Admins panel (see [Operators](user/administrati
 
 ## Instance Admins
 
-Redis — minqlx's own permission database on the running server — is the source of truth for who is an admin and at what level. QLSM stores its own per-instance list (`InstanceAdmin` rows) and reapplies it after every deploy and config save, so a rebuilt host or a wiped Redis database gets its admins back. See `ui/admin_permissions.py` for validation and `ui/task_logic/access_permission_sync.py` / `ui/task_logic/permission_read.py` for the write/read paths.
+Redis — minqlx's own permission database on the running server — is the only source of truth for who is an admin and at what level. QLSM keeps no admin list of its own: it reads the list from Redis, and writes back only what the operator changed. A level set in-game with `!setperm` is never overwritten by a save, restart or deploy. See `ui/admin_permissions.py` for validation and `ui/task_logic/access_permission_sync.py` / `ui/task_logic/permission_read.py` for the write/read paths.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/instances/<int:instance_id>/admins` | GET | QLSM's stored admin rows for the instance plus what is actually live on the server |
+| `/instances/<int:instance_id>/admins` | GET | The instance's admins, read live from its Redis database |
 
 ### Get Instance Admins Response
 
 ```json
 {
   "data": {
-    "stored": [{"steam_id64": "76561198012345678", "level": 5}],
-    "live": {"76561198012345678": 5, "76561198000000001": 3},
-    "managed": ["76561198012345678"],
-    "live_error": null
+    "admins": [{"steam_id64": "76561198012345678", "level": 5}],
+    "error": null
   }
 }
 ```
 
-- `stored`: QLSM's own list for this instance, from `instance_admin` rows.
-- `live`: `{steam_id64: level}` read live off the instance's Redis database over one bounded SSH round trip, or `null` if the read failed.
-- `managed`: the SteamIDs in this instance's `minqlx:qlsm:managed_admins:<instance_id>` Redis set — the ones QLSM itself pushed — or `null` if the read failed. This is what tells an in-game `!setperm` grant apart from a level QLSM pushed and then lost the stored row for.
-- `live_error`: a message explaining why `live`/`managed` are `null` (unreachable host, no Redis, etc.), or `null` on a successful read. `live`, `managed` and `live_error` are independently nullable so a failed read is never confused with a read that simply found nothing.
+- `admins`: every SteamID with a level from 1 to 5 in the instance's Redis database, sorted by SteamID, read over one bounded SSH round trip. `null` when the server could not be read.
+- `error`: why `admins` is `null` (unreachable host, no Redis, etc.), or `null` on a successful read.
 
-### The `admins` Field On Other Endpoints
+### Admin Fields On Other Endpoints
 
-`POST /instances` (create), `PATCH /instances/<id>` (config save / apply), and the preset create/update endpoints all accept an optional `admins` field: a list of `{"steam_id64": "76561198...", "level": 0-5}` objects. **Omitting the field leaves the stored list untouched; sending `[]` revokes everyone** — the two are not the same request. Entries are de-duplicated by SteamID with the last one in the payload winning, and validation rejects (never clamps) an out-of-range or non-numeric level.
+All entries are lists of `{"steam_id64": "76561198...", "level": 0-5}`, de-duplicated by SteamID (last wins); validation rejects, never clamps, an out-of-range or non-numeric level.
 
-For an instance, a change to the stored list is pushed into the running server's minqlx permissions after the deploy or config-apply task finishes (`sync_and_report_access_permissions()`). Levels this instance previously pushed but that are now gone are reset to `0`, tracked via the per-instance managed-admins set described above, so `!setperm` grants and other instances sharing the same Redis database are never touched. Any failure, including one before the SSH round trip even starts, appends a warning to the instance log; the deploy or apply itself still succeeds.
+- `PUT /instances/<id>/config` accepts `admin_changes`: only the admins changed in the Owner & Admins tab. Each entry's level is written to Redis after the config-apply task succeeds; level `0` removes an admin. Admins not listed are left alone. Omitting the field writes nothing.
+- `POST /instances` (create) accepts `admins`: the full list from the Add Instance form or its preset. The deploy task writes it into the new instance's Redis once, after a successful deploy.
+- Preset create/update accept `admins` and write it to `admins.json` in the preset folder. `GET`/list-preset responses return `admins`; it is `null` when the preset has no `admins.json` (distinct from `[]`). Sending `admins: null` is the same as omitting it.
 
-For a preset, the list is written to an `admins.json` file in the preset folder and only takes effect once an instance built from that preset is saved — presets have nothing running to push to. `GET`/list-preset responses return `admins` wherever they return `enabled_hooks`; it is `null` when the preset has no `admins.json` (distinct from `[]`, an empty but present list).
+A failed write (SSH or Redis unreachable) appends a warning to the instance log; the deploy or apply itself still succeeds. The write also deletes any `minqlx:qlsm:managed_admins*` keys left behind by older QLSM versions.
 
 ## Settings
 

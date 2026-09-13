@@ -1172,7 +1172,7 @@ def test_config_save_rejects_a_bad_admin_level(
         response = client.put(
             f'/api/instances/{instance.id}/config',
             json={'configs': _full_configs(),
-                  'admins': [{'steam_id64': '76561198012345678', 'level': 99}],
+                  'admin_changes': [{'steam_id64': '76561198012345678', 'level': 99}],
                   'restart': False},
             headers=_auth_header(auth_token),
         )
@@ -1180,86 +1180,49 @@ def test_config_save_rejects_a_bad_admin_level(
     assert 'between 0 and 5' in response.get_json()['error']['message']
 
 
-def test_config_save_persists_admins(
-    client, app, auth_token, sample_instance, tmp_path, monkeypatch
+def test_config_save_passes_only_admin_changes_to_the_task(
+    client, auth_token, sample_instance, tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
     instance, _host = sample_instance
     with patch('ui.routes.instance_routes.acquire_lock', return_value=True), \
-         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')):
+         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')) as enqueue:
         response = client.put(
             f'/api/instances/{instance.id}/config',
             json={'configs': _full_configs(),
-                  'admins': [{'steam_id64': '76561198012345678', 'level': 2}],
+                  'admin_changes': [{'steam_id64': '76561198012345678', 'level': 2},
+                                    {'steam_id64': '76561198087654321', 'level': 0}],
                   'restart': False},
             headers=_auth_header(auth_token),
         )
     assert response.status_code == 202, response.get_json()
-    with app.app_context():
-        from ui.models import InstanceAdmin
-        rows = InstanceAdmin.query.filter_by(instance_id=instance.id).all()
-        assert [(r.steam_id64, r.level) for r in rows] == [('76561198012345678', 2)]
+    assert enqueue.call_args.kwargs['admin_levels'] == {
+        '76561198012345678': 2, '76561198087654321': 0,
+    }
 
 
-def test_config_save_omitted_admins_leaves_rows_untouched(
-    client, app, auth_token, sample_instance, tmp_path, monkeypatch
+def test_config_save_without_admin_changes_writes_no_admins(
+    client, auth_token, sample_instance, tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
     instance, _host = sample_instance
-    with app.app_context():
-        from ui.admin_permissions import replace_instance_admins
-        from ui.models import QLInstance as _QLInstance
-        inst = db.session.get(_QLInstance, instance.id)
-        replace_instance_admins(inst, [{'steam_id64': '76561198012345678', 'level': 3}])
-        db.session.commit()
-
     with patch('ui.routes.instance_routes.acquire_lock', return_value=True), \
-         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')):
+         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')) as enqueue:
         response = client.put(
             f'/api/instances/{instance.id}/config',
             json={'configs': _full_configs(), 'restart': False},
             headers=_auth_header(auth_token),
         )
     assert response.status_code == 202, response.get_json()
-    with app.app_context():
-        from ui.models import InstanceAdmin
-        rows = InstanceAdmin.query.filter_by(instance_id=instance.id).all()
-        assert [(r.steam_id64, r.level) for r in rows] == [('76561198012345678', 3)]
+    assert enqueue.call_args.kwargs['admin_levels'] == {}
 
 
-def test_config_save_empty_admins_revokes_everyone(
-    client, app, auth_token, sample_instance, tmp_path, monkeypatch
+def test_create_instance_passes_its_admins_to_the_deploy_task(
+    client, auth_token, sample_host, tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
-    instance, _host = sample_instance
-    with app.app_context():
-        from ui.admin_permissions import replace_instance_admins
-        from ui.models import QLInstance as _QLInstance
-        inst = db.session.get(_QLInstance, instance.id)
-        replace_instance_admins(inst, [{'steam_id64': '76561198012345678', 'level': 3}])
-        db.session.commit()
-
     with patch('ui.routes.instance_routes.acquire_lock', return_value=True), \
-         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')):
-        response = client.put(
-            f'/api/instances/{instance.id}/config',
-            json={'configs': _full_configs(), 'admins': [], 'restart': False},
-            headers=_auth_header(auth_token),
-        )
-    assert response.status_code == 202, response.get_json()
-    with app.app_context():
-        from ui.models import InstanceAdmin
-        assert InstanceAdmin.query.filter_by(instance_id=instance.id).count() == 0
-
-
-def test_create_instance_commits_its_admins(
-    client, app, auth_token, sample_host, tmp_path, monkeypatch
-):
-    """The rows must land before the DEPLOYING commit -- the worker is a
-    separate process and would otherwise deploy with no admins."""
-    monkeypatch.chdir(tmp_path)
-    with patch('ui.routes.instance_routes.acquire_lock', return_value=True), \
-         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')):
+         patch('ui.routes.instance_routes.enqueue_task', return_value=MagicMock(id='job-1')) as enqueue:
         response = client.post(
             '/api/instances/',
             json={'name': 'admins-on-create-instance', 'host_id': sample_host.id,
@@ -1268,11 +1231,7 @@ def test_create_instance_commits_its_admins(
             headers=_auth_header(auth_token),
         )
     assert response.status_code in (201, 202), response.get_json()
-    instance_id = response.get_json()['data']['id']
-    with app.app_context():
-        from ui.models import InstanceAdmin
-        rows = InstanceAdmin.query.filter_by(instance_id=instance_id).all()
-        assert [(r.steam_id64, r.level) for r in rows] == [('76561198012345678', 4)]
+    assert enqueue.call_args.kwargs['admin_levels'] == {'76561198012345678': 4}
 
 
 def test_create_instance_rejects_a_bad_admin_level_before_creating_anything(

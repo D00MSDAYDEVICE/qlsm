@@ -1,16 +1,12 @@
 import pytest
 
 from ui.admin_permissions import (
-    entries_from_rows,
+    levels_from_entries,
     strip_numeric_admin_lines,
     validate_admin_entries,
 )
 
 
-class Row:
-    def __init__(self, steam_id64, level):
-        self.steam_id64 = steam_id64
-        self.level = level
 
 
 def test_validate_accepts_well_formed_entries():
@@ -73,5 +69,6 @@ def test_strip_removes_only_numeric_level_lines():
     )
 
 
-def test_entries_from_rows():
-    assert entries_from_rows([Row("76561198012345678", 3)]) == {"76561198012345678": 3}
+def test_levels_from_entries():
+    assert levels_from_entries([{"steam_id64": "76561198012345678", "level": "3"}]) == {"76561198012345678": 3}
+    assert levels_from_entries(None) == {}

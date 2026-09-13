@@ -95,9 +95,7 @@ def delete_instance(instance_id):
     instance = get_instance(instance_id)
     if not instance:
         return False
-
-    # An ORM delete walks QLInstance.admins (cascade='all, delete-orphan'), so
-    # the instance's admin rows go with it.
+    
     db.session.delete(instance)
     db.session.commit()
     return True

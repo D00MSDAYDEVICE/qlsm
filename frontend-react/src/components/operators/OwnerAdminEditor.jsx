@@ -9,8 +9,8 @@ import AddOperatorModal from './AddOperatorModal';
 import useInstanceAdmins from './useInstanceAdmins';
 
 // Owner comes from qlx_owner in server.cfg (minqlx reads the cvar). Admin
-// levels live in the instance's minqlx Redis database; QLSM stores its own
-// list per instance and pushes it on save. `instanceId` is null wherever there
+// levels live only in the instance's minqlx Redis database: the tab shows what
+// the server has, and a save writes back just the changes. `instanceId` is null wherever there
 // is no running server to read -- Add Instance and the preset pages.
 function OwnerAdminEditor({
   serverCfgContent,
@@ -54,7 +54,7 @@ function OwnerAdminEditor({
   // opens already filled. `adminsPreload` is the request Edit Configuration
   // started on open; awaiting it avoids a second SSH read.
   const {
-    rows, loading, liveError, refresh, addAdmin, removeAdmin, adoptAdmin,
+    rows, loading, error, editable, refresh, addAdmin, removeAdmin,
   } = useInstanceAdmins({
     instanceId,
     active: Boolean(instanceId),
@@ -131,11 +131,14 @@ function OwnerAdminEditor({
             )}
           </div>
 
-          {liveError && (
+          {error && (
             <div className="mb-2 flex items-start gap-2 rounded-md border border-[var(--accent-warning)]/40 bg-[var(--accent-warning)]/10 px-2.5 py-1.5 text-xs text-[var(--text-secondary)]">
               <AlertTriangle size={14} className="mt-0.5 flex-shrink-0 text-[var(--accent-warning)]" />
-              <span>{liveError} Showing the list QLSM has stored; changes apply on the next successful save.</span>
+              <span>{error} Admins can't be edited until the server can be read.</span>
             </div>
+          )}
+          {instanceId && loading && rows.length === 0 && !error && (
+            <p className="mb-2 text-xs text-[var(--text-muted)]">Reading admins from the server…</p>
           )}
 
           <div className="flex gap-2">
@@ -146,17 +149,19 @@ function OwnerAdminEditor({
                 operators={assignable}
                 placeholder="Add operator as admin…"
                 allowClear={false}
+                disabled={!editable}
               />
             </div>
             <div className="w-16 flex-shrink-0">
-              <select value={pendingLevel} onChange={(e) => setPendingLevel(e.target.value)} className="input-base">
+              <select value={pendingLevel} onChange={(e) => setPendingLevel(e.target.value)} className="input-base"
+                      disabled={!editable}>
                 {/* No 0: a level-0 entry is "not an admin", and removal is how
                     a level is revoked. The API still accepts 0 so rows imported
                     from legacy "steamid|0" lines stay valid. */}
                 {[1, 2, 3, 4, 5].map((lvl) => <option key={lvl} value={lvl}>{lvl}</option>)}
               </select>
             </div>
-            <button type="button" onClick={handleAddAdmin} disabled={!pendingAdmin}
+            <button type="button" onClick={handleAddAdmin} disabled={!pendingAdmin || !editable}
                     className="btn btn-secondary flex-shrink-0 px-3">
               Add
             </button>
@@ -170,7 +175,7 @@ function OwnerAdminEditor({
                   row={row}
                   operator={operatorsById.get(row.steamId) || null}
                   onRemove={removeAdmin}
-                  onAdopt={adoptAdmin}
+                  disabled={!editable}
                   onAddToDirectory={() => setDirectoryRow(row)}
                 />
               ))}

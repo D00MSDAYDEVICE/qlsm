@@ -1,50 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getInstanceAdmins } from '../../services/api';
 
-// Merges QLSM's stored admin rows with the live minqlx levels read off the
-// server. The *parent* owns the edited list: `entries` is null until the user
-// touches something, and only the mutators call onChange. Nothing is ever
-// mirrored upward from an effect -- that loops forever (parent setState -> new
-// prop reference -> new memo array -> effect again) and it would also mark the
-// modal dirty on open and send an empty admin list on a save that raced the
-// initial GET, revoking everyone.
+// Admin list for the Owner & Admins tab. Redis on the game server is the only
+// source of truth: with an instance, the list is whatever the server has right
+// now (including levels set in-game with !setperm). The *parent* owns edits:
+// `entries` is null until the user touches something, and only the mutators
+// call onChange. Nothing is mirrored upward from an effect -- that loops
+// (parent setState -> new prop -> effect again) and would mark the modal dirty
+// on open.
+//
 // `preload`, when given, is an in-flight getInstanceAdmins promise the parent
 // started earlier (Edit Configuration starts it on open). The first load awaits
 // it instead of making its own SSH round trip; Refresh always refetches.
 export default function useInstanceAdmins({ instanceId, active, entries, onChange, onLoaded, preload = null }) {
-  const [stored, setStored] = useState([]);
   const [live, setLive] = useState(null);
-  const [managed, setManaged] = useState(null);
-  const [liveError, setLiveError] = useState(null);
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // onLoaded typically closes over parent state-setters, so a real caller
-  // passes it inline and its identity changes every render. Keeping it out of
-  // load's dependency array via a ref (updated every render, never a fetch
-  // trigger) is what stops that from recreating `load` -> re-firing the mount
-  // effect below -> refetching -> calling onLoaded -> parent re-render -> loop.
+  // onLoaded is usually an inline callback; keep it out of load's dependencies
+  // so a new identity every render cannot re-trigger the fetch.
   const onLoadedRef = useRef(onLoaded);
   useEffect(() => { onLoadedRef.current = onLoaded; });
 
-  // Refresh replaces server state only. The user's pending edits live in the
-  // parent and are deliberately untouched: Refresh shows in-game changes, it is
-  // not a discard button.
+  // Refresh replaces the server list only. Pending edits live in the parent
+  // and stay: Refresh shows in-game changes, it is not a discard button.
   const load = useCallback(async (pending = null) => {
     if (!instanceId) return;
     setLoading(true);
     try {
       const data = await (pending || getInstanceAdmins(instanceId));
-      setStored(data.stored || []);
-      setLive(data.live ?? null);
-      setManaged(data.managed ?? null);
-      setLiveError(data.live_error || null);
-      // Non-dirtying: lets the parent save-as-preset an untouched list. The
-      // parent must not feed this back in as `entries`.
-      if (onLoadedRef.current) {
-        onLoadedRef.current((data.stored || []).map((r) => ({ steam_id64: r.steam_id64, level: r.level })));
-      }
+      const admins = Array.isArray(data?.admins) ? data.admins : null;
+      setLive(admins);
+      setError(admins ? null : (data?.error || 'Could not read the admin list.'));
+      if (admins && onLoadedRef.current) onLoadedRef.current(admins);
     } catch (err) {
-      setLiveError(err?.error?.message || 'Could not load the admin list.');
+      setLive(null);
+      setError(err?.error?.message || 'Could not read the admin list.');
     } finally {
       setLoading(false);
     }
@@ -52,43 +43,11 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
 
   useEffect(() => { if (active) load(preload); }, [active, load, preload]);
 
-  const storedEntries = useMemo(
-    () => (stored || []).map((row) => ({ steam_id64: row.steam_id64, level: row.level })),
-    [stored],
+  const effectiveEntries = useMemo(() => entries ?? live ?? [], [entries, live]);
+  const rows = useMemo(
+    () => effectiveEntries.map(({ steam_id64: steamId, level }) => ({ steamId, level })),
+    [effectiveEntries],
   );
-  // Untouched: show what the server has (or, with no instance, the parent's list).
-  const effectiveEntries = entries ?? storedEntries;
-
-  const rows = useMemo(() => {
-    // live === null means the read failed or there was nothing to read. No row
-    // may then claim to be managed or pending -- the banner says why instead.
-    const liveKnown = live !== null && live !== undefined;
-    const listed = new Set(effectiveEntries.map((e) => e.steam_id64));
-    const managedSet = new Set(managed || []);
-
-    const merged = effectiveEntries.map(({ steam_id64: steamId, level }) => ({
-      steamId,
-      level,
-      state: !liveKnown
-        ? 'unknown'
-        : (managedSet.has(steamId) && live[steamId] === level ? 'managed' : 'pending'),
-    }));
-
-    if (liveKnown) {
-      Object.entries(live).forEach(([steamId, level]) => {
-        if (listed.has(steamId)) return;
-        if (level <= 0) return; // a key set to 0 is a revoked admin, not an admin
-        merged.push({
-          steamId,
-          level,
-          // In the managed set with no stored row: QLSM pushed this and lost the
-          // row, so the next save resets it to 0 unless it is adopted.
-          state: managedSet.has(steamId) ? 'will-be-revoked' : 'live-only',
-        });
-      });
-    }
-    return merged;
-  }, [effectiveEntries, live, managed]);
 
   const emit = useCallback((next) => { if (onChange) onChange(next); }, [onChange]);
 
@@ -103,21 +62,16 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
     emit(effectiveEntries.filter((e) => e.steam_id64 !== steamId));
   }, [effectiveEntries, emit]);
 
-  const adoptAdmin = useCallback((steamId) => {
-    const level = (live || {})[steamId];
-    if (level === undefined) return;
-    emit([...effectiveEntries, { steam_id64: steamId, level }]);
-  }, [effectiveEntries, live, emit]);
-
   return {
     rows,
     loading,
-    liveError,
+    error,
+    // Without an instance (Add Instance, presets) the list is local and always
+    // editable. With one, only once the server list is known: editing blind
+    // would turn every unseen admin into a removal.
+    editable: !instanceId || live !== null,
     refresh: () => load(),
     addAdmin,
     removeAdmin,
-    adoptAdmin,
-    effectiveEntries,
-    dirty: entries !== null && entries !== undefined,
   };
 }
