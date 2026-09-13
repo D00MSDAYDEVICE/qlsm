@@ -134,6 +134,7 @@ EVENT_ARITIES = {
     "damage":               5,   # :875  (target, attacker, damage, dflags, mod)  <- minqlxtended only
     "death":                3,   # :812  (victim, killer, mod)  <- differs from minqlx
     "demo_finished":        5,   # :970  (client_id, path, size, discarded, failed)  <- minqlxtended only
+    "demo_stream":          3,   # :980  (connected, endpoint, error)  <- minqlxtended only
     "frame":                0,   # :509  ()
     "game_countdown":       0,   # :690  ()
     "game_end":             1,   # :711  (aborted)  <- differs from minqlx
