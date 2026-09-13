@@ -61,6 +61,10 @@ rebuilt host or a wiped Redis database gets its admins back.
 
 The **Manage operators** link opens **Settings → Operators** in a new tab.
 
+QLSM reads the admin list from the server as soon as **Edit Configuration**
+opens, so the tab is already filled when you switch to it. **Save Preset**
+includes the admin list even if you never opened the tab.
+
 An admin whose SteamID is not in the operator directory shows as a bare
 SteamID with an **Add to operators** button. It opens the same Add Operator
 dialog as the Operators page, on top of the configuration window, with the

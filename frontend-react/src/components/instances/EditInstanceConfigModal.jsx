@@ -3,7 +3,7 @@ import { Dialog, DialogBackdrop } from '@headlessui/react';
 import { X, LoaderCircle, Zap, AlertTriangle, Settings, Code2, LayoutGrid, Save, FolderOpen, RotateCw, Webhook, Crown } from 'lucide-react';
 import { json, jsonParseLinter } from '@codemirror/lang-json';
 import { python } from '@codemirror/lang-python';
-import { getInstanceConfig, updateInstanceConfig, getInstanceById, getPresets, getPresetById, createPreset, updatePreset, getFactoryTree, getFactoryContent, fetchInstanceHooks } from '../../services/api';
+import { getInstanceConfig, updateInstanceConfig, getInstanceById, getPresets, getPresetById, createPreset, updatePreset, getFactoryTree, getFactoryContent, fetchInstanceHooks, getInstanceAdmins } from '../../services/api';
 import { getBinaryMeta, saveBinaryMeta } from '../../services/draftApi';
 import ExpandedEditorModal from '../ExpandedEditorModal';
 import ConfirmationModal from '../ConfirmationModal';
@@ -230,6 +230,21 @@ function EditInstanceConfigModal({
     setAdminEntries(next);
     setIsDirty(true);
   }, []);
+
+  // Admin list for a preset: the edited list, else what the modal preloaded.
+  // A preset saved before that preload returns fetches the stored list itself,
+  // so the preset never silently drops admins. null only if that fetch fails.
+  const resolvePresetAdmins = useCallback(async () => {
+    if (adminEntries !== null) return adminEntries;
+    if (loadedAdminEntries !== null) return loadedAdminEntries;
+    if (!instanceId) return null;
+    try {
+      const data = await getInstanceAdmins(instanceId);
+      return (data.stored || []).map((r) => ({ steam_id64: r.steam_id64, level: r.level }));
+    } catch {
+      return null;
+    }
+  }, [adminEntries, instanceId, loadedAdminEntries]);
 
   // Resolve raw qlx_plugins names to full tree paths once on initial load.
   // Only root-level files can match — a name that resolves solely to a
@@ -688,10 +703,7 @@ function EditInstanceConfigModal({
       if (hooksLoaded) {
         presetData.enabled_hooks = hookEnabledOrder;
       }
-      // Edited list if there is one, otherwise whatever the server has. null
-      // only when neither is known (nothing loaded, nothing edited), and the
-      // backend then leaves admins.json out.
-      presetData.admins = adminEntries ?? loadedAdminEntries;
+      presetData.admins = await resolvePresetAdmins();
 
       presetData.lan_rate_enabled = lanRateEnabled;
 
@@ -718,7 +730,7 @@ function EditInstanceConfigModal({
     } finally {
       setIsSavingPreset(false);
     }
-  }, [adminEntries, checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, loadedAdminEntries, pluginDraftId, serializeConfigs, serializeFactories, showSuccess, showError]);
+  }, [checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, pluginDraftId, resolvePresetAdmins, serializeConfigs, serializeFactories, showSuccess, showError]);
 
   const handleOverwritePreset = useCallback(async (presetId, { description, runtime }) => {
     setIsSavingPreset(true);
@@ -744,7 +756,7 @@ function EditInstanceConfigModal({
       if (hooksLoaded) {
         presetData.enabled_hooks = hookEnabledOrder;
       }
-      presetData.admins = adminEntries ?? loadedAdminEntries;
+      presetData.admins = await resolvePresetAdmins();
       presetData.lan_rate_enabled = lanRateEnabled;
       presetData.binary_meta_source = { context_type: 'instance', context_key: String(instanceId) };
       const response = await updatePreset(presetId, presetData);
@@ -759,7 +771,7 @@ function EditInstanceConfigModal({
     } finally {
       setIsSavingPreset(false);
     }
-  }, [adminEntries, checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, loadedAdminEntries, pluginDraftId, serializeConfigs, serializeFactories, showSuccess, showError]);
+  }, [checkedPlugins, hookEnabledOrder, hooksLoaded, instanceId, lanRateEnabled, pluginDraftId, resolvePresetAdmins, serializeConfigs, serializeFactories, showSuccess, showError]);
 
   const handlePresetDeleted = useCallback((deletedPresetId) => {
     setPresets(prevPresets => prevPresets.filter(p => p.id !== deletedPresetId));
@@ -1217,7 +1229,6 @@ function EditInstanceConfigModal({
                               serverCfgContent={serverCfgContent}
                               onServerCfgChange={handleServerCfgOwnerChange}
                               instanceId={instanceId}
-                              visible={activeMainTab === 'admins'}
                               adminEntries={adminEntries}
                               onAdminEntriesChange={handleAdminEntriesChange}
                               onAdminEntriesLoaded={setLoadedAdminEntries}

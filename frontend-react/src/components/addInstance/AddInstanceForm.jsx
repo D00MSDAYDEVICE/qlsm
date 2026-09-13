@@ -1377,7 +1377,6 @@ function AddInstanceForm({
                 serverCfgContent={configContents['server.cfg'] || ''}
                 onServerCfgChange={handleOwnerChange}
                 instanceId={null}
-                visible={activeMainTab === 'admins'}
                 adminEntries={adminEntries}
                 onAdminEntriesChange={handleAdminEntriesChange}
                 onAdminEntriesLoaded={setLoadedAdminEntries}

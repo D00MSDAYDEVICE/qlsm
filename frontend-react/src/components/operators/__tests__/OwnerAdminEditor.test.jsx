@@ -19,12 +19,10 @@ beforeEach(() => {
   createOperator.mockReset().mockResolvedValue({});
 });
 
-// Every render passes visible: the SSH read is gated on the tab being open.
 const base = {
   serverCfgContent: '',
   onServerCfgChange: () => {},
   instanceId: 1,
-  visible: true,
   adminEntries: null,
   onAdminEntriesChange: () => {},
 };
@@ -61,12 +59,11 @@ it('does not read live state without an instance id', async () => {
   expect(getInstanceAdmins).not.toHaveBeenCalled();
 });
 
-it('does not read live state while the tab is hidden', async () => {
-  // The component stays mounted behind a hidden class to fill the operators
-  // cache; the SSH round trip must not ride along on every modal open.
-  render(<OwnerAdminEditor {...base} visible={false} />);
-  await waitFor(() => expect(getOperators).toHaveBeenCalled());
-  expect(getInstanceAdmins).not.toHaveBeenCalled();
+it('reads the admin list on mount, before the tab is ever shown', async () => {
+  // The modal keeps the editor mounted behind a hidden tab so the list is
+  // preloaded: the tab opens filled and Save Preset includes it.
+  render(<OwnerAdminEditor {...base} />);
+  await waitFor(() => expect(getInstanceAdmins).toHaveBeenCalledWith(1));
 });
 
 it('reports nothing upward on mount', async () => {
