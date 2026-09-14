@@ -32,11 +32,17 @@ describe('AdminRow', () => {
     expect(screen.getByRole('button', { name: /remove admin/i })).toBeDisabled();
   });
 
-  it('exposes the SteamID and level via data-testid', () => {
+  it('shows the name and SteamID on the row, but not the level (the card header has it)', () => {
     render(<AdminRow row={row()} operator={{ name: 'Vex' }} />);
     const rowEl = screen.getByTestId('admin-row-76561198012345678');
     expect(rowEl).toHaveTextContent('Vex');
-    expect(rowEl).toHaveTextContent('lvl 3');
+    expect(rowEl).toHaveTextContent('76561198012345678');
+    expect(rowEl).not.toHaveTextContent(/lvl/);
+  });
+
+  it('shows the SteamID only once when there is no name', () => {
+    render(<AdminRow row={row()} operator={null} />);
+    expect(screen.getAllByText('76561198012345678')).toHaveLength(1);
   });
 
   it('shows the in-game name with the SteamID when not in the directory', () => {

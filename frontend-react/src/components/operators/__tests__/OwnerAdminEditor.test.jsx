@@ -35,7 +35,8 @@ it('shows the owner from server.cfg even when not in the directory', async () =>
 it('lists every admin the server has, with no Adopt button or badges', async () => {
   getInstanceAdmins.mockResolvedValue({ admins: [{ steam_id64: '76561198087654321', level: 4 }], error: null });
   render(<OwnerAdminEditor {...base} />);
-  expect(await screen.findByTestId('admin-row-76561198087654321')).toHaveTextContent('lvl 4');
+  const row = await screen.findByTestId('admin-row-76561198087654321');
+  expect(within(screen.getByTestId('admin-level-4')).getByTestId('admin-row-76561198087654321')).toBe(row);
   expect(screen.queryByRole('button', { name: /adopt/i })).not.toBeInTheDocument();
   expect(screen.queryByText(/set in-game|managed|not applied/i)).not.toBeInTheDocument();
 });
@@ -136,4 +137,23 @@ it('prefills the Add Operator name from the in-game name, colors stripped', asyn
   await userEvent.click(await screen.findByRole('button', { name: /add to operators/i }));
   const dialog = await screen.findByRole('dialog');
   expect(within(dialog).getByLabelText('Name')).toHaveValue('ST01C');
+});
+
+it('groups admins into level cards, highest first, hiding empty levels, with a total count', async () => {
+  getInstanceAdmins.mockResolvedValue({
+    admins: [
+      { steam_id64: '76561198000000003', level: 3 },
+      { steam_id64: '76561198000000005', level: 5 },
+      { steam_id64: '76561198000000033', level: 3 },
+    ],
+    names: {},
+    error: null,
+  });
+  render(<OwnerAdminEditor {...base} />);
+  await screen.findByTestId('admin-level-5');
+  const cards = screen.getAllByTestId(/^admin-level-/);
+  expect(cards.map((c) => c.dataset.testid)).toEqual(['admin-level-5', 'admin-level-3']);
+  expect(cards[0]).toHaveTextContent('Level 5');
+  expect(within(cards[1]).getAllByTestId(/^admin-row-/)).toHaveLength(2);
+  expect(screen.getByTestId('admin-count')).toHaveTextContent('3');
 });

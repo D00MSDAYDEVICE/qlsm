@@ -49,6 +49,10 @@ the preset add and edit pages they appear as a panel above the config fields.
   **Add**. Admins are picked from the operator directory above, so granting a
   raw SteamID means adding that person there first.
 
+The admin list is grouped into one card per level, from **Level 5** down to
+**Level 1**; levels with nobody in them are hidden. The count next to
+**Server Admins** is the total across all levels.
+
 Higher levels unlock more minqlx admin commands. Level **5** is the highest
 and includes `!setperm`, which lets that admin grant permissions to other
 players, so only give 5 to people you trust with that.
