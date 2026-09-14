@@ -125,3 +125,15 @@ it('Add to operators opens a prefilled modal in place and names the row on save'
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(parentSubmit).not.toHaveBeenCalled();
 });
+
+it('prefills the Add Operator name from the in-game name, colors stripped', async () => {
+  getInstanceAdmins.mockResolvedValue({
+    admins: [{ steam_id64: '76561198087654321', level: 4 }],
+    names: { '76561198087654321': '^1ST^701C' },
+    error: null,
+  });
+  render(<OwnerAdminEditor {...base} />);
+  await userEvent.click(await screen.findByRole('button', { name: /add to operators/i }));
+  const dialog = await screen.findByRole('dialog');
+  expect(within(dialog).getByLabelText('Name')).toHaveValue('ST01C');
+});

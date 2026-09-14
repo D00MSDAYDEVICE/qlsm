@@ -28,9 +28,28 @@ function renderAdmins(props = {}) {
 it('shows exactly what the server has', async () => {
   getInstanceAdmins.mockResolvedValue({ admins: [{ steam_id64: A, level: 3 }, { steam_id64: B, level: 5 }], error: null });
   const { result } = renderAdmins();
-  await waitFor(() => expect(result.current.rows).toEqual([{ steamId: A, level: 3 }, { steamId: B, level: 5 }]));
+  await waitFor(() => expect(result.current.rows).toEqual([
+    { steamId: A, level: 3, inGameName: null },
+    { steamId: B, level: 5, inGameName: null },
+  ]));
   expect(result.current.editable).toBe(true);
   expect(result.current.error).toBeNull();
+});
+
+it('attaches in-game names to rows without putting them in entries', async () => {
+  getInstanceAdmins.mockResolvedValue({
+    admins: [{ steam_id64: A, level: 3 }, { steam_id64: B, level: 5 }],
+    names: { [B]: '^1ST01C' },
+    error: null,
+  });
+  const { result, onChange } = renderAdmins();
+  await waitFor(() => expect(result.current.rows).toEqual([
+    { steamId: A, level: 3, inGameName: null },
+    { steamId: B, level: 5, inGameName: '^1ST01C' },
+  ]));
+  act(() => result.current.addAdmin(A, '4'));
+  expect(onChange).toHaveBeenLastCalledWith([{ steam_id64: B, level: 5 }, { steam_id64: A, level: 4 }]);
+  expect(result.current.rows.find((r) => r.steamId === B).inGameName).toBe('^1ST01C');
 });
 
 it('shows the error, no rows, and is not editable when the server cannot be read', async () => {
@@ -40,6 +59,7 @@ it('shows the error, no rows, and is not editable when the server cannot be read
   expect(result.current.rows).toEqual([]);
   expect(result.current.editable).toBe(false);
 });
+
 
 it('reports nothing upward until a mutator runs, then edits the server list', async () => {
   getInstanceAdmins.mockResolvedValue({ admins: [{ steam_id64: A, level: 3 }], error: null });
@@ -81,7 +101,7 @@ it('without an instance the list is local and editable', () => {
     instanceId: null, active: false, entries: [{ steam_id64: A, level: 2 }], onChange: () => {},
   }));
   expect(getInstanceAdmins).not.toHaveBeenCalled();
-  expect(result.current.rows).toEqual([{ steamId: A, level: 2 }]);
+  expect(result.current.rows).toEqual([{ steamId: A, level: 2, inGameName: null }]);
   expect(result.current.editable).toBe(true);
 });
 

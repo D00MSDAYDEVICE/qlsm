@@ -38,4 +38,19 @@ describe('AdminRow', () => {
     expect(rowEl).toHaveTextContent('Vex');
     expect(rowEl).toHaveTextContent('lvl 3');
   });
+
+  it('shows the in-game name with the SteamID when not in the directory', () => {
+    render(<AdminRow row={row({ inGameName: '^1ST^701C' })} operator={null} onAddToDirectory={vi.fn()} />);
+    const rowEl = screen.getByTestId('admin-row-76561198012345678');
+    expect(rowEl).toHaveTextContent('ST01C');
+    expect(rowEl).not.toHaveTextContent('^1');
+    expect(screen.getByText('76561198012345678')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add to operators/i })).toBeInTheDocument();
+  });
+
+  it('prefers the operator name over the in-game name', () => {
+    render(<AdminRow row={row({ inGameName: 'Other' })} operator={{ name: 'Vex' }} />);
+    expect(screen.getByText('Vex')).toBeInTheDocument();
+    expect(screen.queryByText('Other')).not.toBeInTheDocument();
+  });
 });
