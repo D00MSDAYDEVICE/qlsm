@@ -197,7 +197,7 @@ If that file declares a `cvars` list, a settings (gear) icon appears next to the
 - **Number field** (with min/max, when the manifest sets them) for `number` cvars.
 - **Text field** for `string` cvars.
 
-Saving writes each edited cvar as a `set <cvar> "<value>"` line into `server.cfg` — the same mechanism used to sync the **Hostname** field with `sv_hostname`. Values you don't touch keep whatever is already in `server.cfg` (or the manifest's declared default if the line isn't present yet). This is plain text editing under the hood, so it's still visible and editable directly in the **Config** tab afterward.
+Saving writes each edited cvar as a `set <cvar> "<value>"` line into `server.cfg` — the same mechanism used to sync the **Hostname** field with `sv_hostname`. Only settings you change are written. Settings you don't touch are left as they are: an existing line stays unchanged, and a setting with no line gets no new one, so the plugin keeps using its own default (including a new default from a later plugin update). Saving without changes leaves `server.cfg` untouched. Clearing a text field writes it as `""`. This is plain text editing under the hood, so it's still visible and editable directly in the **Config** tab afterward.
 
 This is available both when editing an existing instance's config and when deploying a new instance.
 

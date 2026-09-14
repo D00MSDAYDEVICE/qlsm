@@ -28,10 +28,16 @@ export default function PluginCvarsModal({
   configText = '',
 }) {
   const [values, setValues] = useState({});
+  // What the form opened with, so Save can write only the cvars the operator
+  // actually changed -- an untouched default must not get pinned into
+  // server.cfg, or a later plugin update to that default would never apply.
+  const [openedWith, setOpenedWith] = useState({});
 
   useEffect(() => {
     if (isOpen) {
-      setValues(initialValues(cvars, configText));
+      const initial = initialValues(cvars, configText);
+      setValues(initial);
+      setOpenedWith(initial);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -44,8 +50,12 @@ export default function PluginCvarsModal({
     let nextConfig = configText;
     for (const c of cvars) {
       const value = values[c.cvar];
-      if (value === null || value === undefined || value === '') continue;
-      nextConfig = upsertCvarInConfig(nextConfig, c.cvar, serializeCvarValue(c.type, value));
+      // A cleared number field has no valid value to write; a cleared text
+      // field is a real value ("") and is written like any other edit.
+      if (value === null || value === undefined) continue;
+      const serialized = serializeCvarValue(c.type, value);
+      if (serialized === serializeCvarValue(c.type, openedWith[c.cvar])) continue;
+      nextConfig = upsertCvarInConfig(nextConfig, c.cvar, serialized);
     }
     onSave(nextConfig);
     onClose();

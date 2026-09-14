@@ -67,6 +67,66 @@ describe('PluginCvarsModal', () => {
     expect(nextConfig).toContain('set qlx_chatRconRefPerm "2"');
   });
 
+  it('writes only the cvars that were changed, leaving untouched defaults out', () => {
+    const onSave = vi.fn();
+    render(
+      <PluginCvarsModal
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+        pluginLabel="Chat RCON"
+        cvars={CVARS}
+        configText={'set sv_hostname "My Server"\n'}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Referee Permission Level' }), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    const nextConfig = onSave.mock.calls[0][0];
+    expect(nextConfig).toContain('set qlx_chatRconRefPerm "2"');
+    expect(nextConfig).not.toContain('qlx_chatRconEnabled');
+    expect(nextConfig).not.toContain('qlx_chatRconRefCommands');
+  });
+
+  it('leaves server.cfg unchanged when saved without edits', () => {
+    const onSave = vi.fn();
+    const configText = 'set sv_hostname "My Server"\nset qlx_chatRconRefPerm "4"\n';
+    render(
+      <PluginCvarsModal
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+        pluginLabel="Chat RCON"
+        cvars={CVARS}
+        configText={configText}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(onSave.mock.calls[0][0]).toBe(configText);
+  });
+
+  it('writes an empty string when a text cvar is cleared', () => {
+    const onSave = vi.fn();
+    render(
+      <PluginCvarsModal
+        isOpen
+        onClose={vi.fn()}
+        onSave={onSave}
+        pluginLabel="Chat RCON"
+        cvars={CVARS}
+        configText={'set qlx_chatRconRefCommands "pause"\n'}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Referee-Allowed Commands' }), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    expect(onSave.mock.calls[0][0]).toContain('set qlx_chatRconRefCommands ""');
+  });
+
   it('calls onClose without saving on Cancel', () => {
     const onSave = vi.fn();
     const onClose = vi.fn();
