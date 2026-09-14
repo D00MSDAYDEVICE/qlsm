@@ -157,3 +157,13 @@ it('groups admins into level cards, highest first, hiding empty levels, with a t
   expect(within(cards[1]).getAllByTestId(/^admin-row-/)).toHaveLength(2);
   expect(screen.getByTestId('admin-count')).toHaveTextContent('3');
 });
+
+it('counts only admins shown in a level card', () => {
+  // Presets still accept legacy level-0 entries; those are not admins and get no card.
+  render(<OwnerAdminEditor {...base} instanceId={null} adminEntries={[
+    { steam_id64: '76561198000000005', level: 5 },
+    { steam_id64: '76561198000000000', level: 0 },
+  ]} />);
+  expect(screen.getAllByTestId(/^admin-level-/)).toHaveLength(1);
+  expect(screen.getByTestId('admin-count')).toHaveTextContent('1');
+});
