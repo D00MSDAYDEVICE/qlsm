@@ -167,6 +167,26 @@ export const updateWorkshopItem = async (hostId, data) => {
   }
 };
 
+export const checkPluginUpdates = async (hostId) => {
+  try {
+    const response = await apiClient.get(`/hosts/${hostId}/plugin-updates`);
+    return response.data; // { "data": { common_pool_changes, common_pool_error, instances } }
+  } catch (error) {
+    console.error(`Failed to check plugin updates for host ${hostId}:`, error.response ? error.response.data : error.message);
+    throw error.response ? error.response.data : new Error(`Failed to check plugin updates for host ${hostId}`);
+  }
+};
+
+export const applyPluginUpdates = async (hostId, data) => {
+  try {
+    const response = await apiClient.post(`/hosts/${hostId}/plugin-updates/apply`, data);
+    return response.data; // Assuming API returns { "message": "..." }
+  } catch (error) {
+    console.error(`Failed to apply plugin updates for host ${hostId}:`, error.response ? error.response.data : error.message);
+    throw error.response ? error.response.data : new Error(`Failed to apply plugin updates for host ${hostId}`);
+  }
+};
+
 export const configureAutoRestart = async (hostId, schedule) => {
   try {
     const response = await apiClient.post(`/hosts/${hostId}/auto-restart`, { schedule });
@@ -325,6 +345,7 @@ export const updateInstanceConfig = async (instanceId, configData, restart = tru
       checked_plugins,
       lan_rate_enabled,
       enabled_hooks,
+      admin_changes,
       name,
       hostname,
       ...configs
@@ -359,6 +380,10 @@ export const updateInstanceConfig = async (instanceId, configData, restart = tru
     }
     if (enabled_hooks !== undefined) {
       payload.enabled_hooks = enabled_hooks;
+    }
+    // Only the admins changed in the tab; absent means no admin changes.
+    if (admin_changes !== undefined) {
+      payload.admin_changes = admin_changes;
     }
     const response = await apiClient.put(`/instances/${instanceId}/config`, payload);
     return response.data; // Assuming API returns { "message": "..." }
@@ -758,6 +783,16 @@ export const deleteUser = async (userId) => {
   } catch (error) {
     console.error(`Failed to delete user ${userId}:`, error.response ? error.response.data : error.message);
     throw error.response ? error.response.data : new Error(`Failed to delete user ${userId}`);
+  }
+};
+
+export const getInstanceAdmins = async (instanceId) => {
+  try {
+    const response = await apiClient.get(`/instances/${instanceId}/admins`);
+    return response.data.data;
+  } catch (error) {
+    console.error('Failed to fetch instance admins:', error.response ? error.response.data : error.message);
+    throw error.response ? error.response.data : new Error('Failed to fetch instance admins');
   }
 };
 

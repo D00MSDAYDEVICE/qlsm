@@ -35,6 +35,8 @@ All endpoints except `/api/auth/login` require authentication via JWT cookie.
 | `/hosts/<id>/logs` | GET | Get host task logs |
 | `/hosts/<id>/available-ports` | GET | Get available ports on the host |
 | `/hosts/<id>/update-workshop` | POST | Force workshop items update on host |
+| `/hosts/<id>/plugin-updates` | GET | Diff shipped plugins against the host's common pool and each instance's plugin files |
+| `/hosts/<id>/plugin-updates/apply` | POST | Apply selected plugin updates, optionally restarting instances |
 | `/hosts/<id>/auto-restart` | POST | Configure host auto-restart schedule |
 | `/hosts/<id>/watchdog` | POST | Enable/disable and tune the ql-watchdog add-on |
 
@@ -88,6 +90,100 @@ enabling it installs `gdb` on the host.
 ```json
 {"data": {"task_id": "..."}, "message": "Watchdog configuration queued."}
 ```
+
+### Check Plugin Updates
+
+```
+GET /api/hosts/<id>/plugin-updates
+```
+
+Read-only diff of `ql-assets/data/<pool>/` (the pool is chosen from
+`runtime_paths(host.runtime)['asset_plugins_dir']`) against two targets. Only
+`.py` and `.ql-plugin.json` files at the top level of the pool are compared.
+
+- **Common pool:** the host's `/home/ql/assets/common/<pool>/`, hashed with
+  one ad-hoc `sha256sum` over SSH (15s connect timeout, 30s overall).
+- **Each instance:** `configs/<host_name>/<instance_id>/scripts/`, hashed locally.
+  Only files the instance already has are compared, so every entry is
+  `modified`. A pool file missing from `scripts/` isn't reported, because the
+  restart backfill delivers it from the host pool.
+
+Runs synchronously in the request. Requires the host to be `ACTIVE`.
+
+**Response (200)**
+
+```json
+{
+  "data": {
+    "host_id": 1,
+    "common_pool_changes": [{"name": "balance.py", "change": "modified"}],
+    "common_pool_error": null,
+    "instances": [
+      {
+        "id": 1,
+        "name": "Thunderdome-CA",
+        "port": 27960,
+        "status": "running",
+        "selected_plugin_changes": [
+          {"name": "essentials.py", "change": "modified"}
+        ]
+      }
+    ]
+  }
+}
+```
+
+In `common_pool_changes`, `change` is `added` (in the pool, missing from the
+host), `modified` (hash differs) or `removed` (on the host, gone from the pool;
+the refresh deletes it). If the host can't be read,
+`common_pool_changes` is `[]` and `common_pool_error` carries the reason. The
+per-instance diffs are still returned.
+
+Errors: `404` host not found, `400` host not `ACTIVE`, `500` unexpected failure.
+
+### Apply Plugin Updates
+
+```
+POST /api/hosts/<id>/plugin-updates/apply
+```
+
+Applies the operator's selection from the check as a background task. Requires
+the host to be `ACTIVE` and takes the host lock.
+
+**Request body**
+
+```json
+{
+  "update_common_pool": true,
+  "instances": {"1": ["essentials.py", "protect.py"]},
+  "restart_instances": [1]
+}
+```
+
+- `update_common_pool`: runs `update_common_plugins.yml`, a full
+  `delete: yes` mirror of the pool onto the host. It doesn't restart anything,
+  so running instances pick the refreshed pool up on their next restart.
+- `instances`: object keyed by instance id, each a list of pool filenames.
+  Each file is copied from the pool into that instance's `scripts/`, replacing
+  any existing copy. Names are reduced to their basename and must exist in the
+  pool. Unknown names, and ids that aren't instances of this host, are skipped.
+- `restart_instances`: instance ids to restart afterwards. Stopped instances are
+  never restarted.
+
+At least one of `update_common_pool` or a non-empty `instances` is required.
+
+**Response (202)**
+
+```json
+{"message": "Plugin update process initiated."}
+```
+
+Errors: `404` host not found; `400` host not `ACTIVE`, malformed `instances` or
+`restart_instances`, or nothing selected; `409` another operation holds the
+host lock; `500` enqueue failure.
+
+If the common pool refresh fails, the task sets the host to `ERROR` and stops
+before copying any instance files.
 
 ### Resize Host
 
@@ -1038,7 +1134,7 @@ The directory behind the Owner & Admins panel (see [Operators](user/administrati
 | `/operators/` | GET | List all operators, ordered by name |
 | `/operators/` | POST | Add an operator (`201`) |
 | `/operators/<id>` | PATCH | Update any of `name`, `steam_id64`, `default_level` |
-| `/operators/<id>` | DELETE | Remove an operator from the directory. Existing `qlx_owner` / `access.txt` entries are left in place |
+| `/operators/<id>` | DELETE | Remove an operator from the directory. Existing `qlx_owner` line or stored Admin rows are left in place |
 
 ### Create Operator Request
 
@@ -1052,7 +1148,7 @@ The directory behind the Owner & Admins panel (see [Operators](user/administrati
 
 - `name`: required, trimmed, at most 128 characters.
 - `steam_id64`: required, must match `^7656119\d{10}$`. `409` if another operator already has it.
-- `default_level`: optional integer 0-5, defaults to `5`. Only the `access.txt` editor's autocomplete uses it.
+- `default_level`: optional integer 0-5, defaults to `5`. Only the Owner & Admins tab's Admin picker uses it, as the level pre-filled when that operator is added.
 
 ### Operator Response
 
@@ -1069,9 +1165,37 @@ The directory behind the Owner & Admins panel (see [Operators](user/administrati
 }
 ```
 
-### In-Game Permission Sync
+## Instance Admins
 
-This isn't an endpoint. After a successful `deploy_instance` or `apply_instance_config` task, `sync_and_report_access_permissions()` in `ui/task_logic/access_permission_sync.py` parses the instance's `access.txt` and, over one SSH round trip, sets `minqlx:players:<steamid>:permission` in the instance's Redis DB for every valid `steamid|0-5` line. IDs this instance pushed last time but that are now gone are set to `0`. They are tracked in the per-instance set `minqlx:qlsm:managed_admins:<instance_id>`, so levels granted in-game with `!setperm` are never touched, and instances sharing a Redis DB never reset each other's admins. The first sync on an instance adopts, then deletes, the older DB-wide set `minqlx:qlsm:managed_admins`, so admins pushed before the change can still be revoked. Lines with a missing, non-integer or out-of-range level (including QL-native `admin`/`mod`/`ban`) are skipped. Any failure, including an exception before the round trip, appends a warning to the instance log. The deploy or apply itself still succeeds.
+Redis — minqlx's own permission database on the running server — is the only source of truth for who is an admin and at what level. QLSM keeps no admin list of its own: it reads the list from Redis, and writes back only what the operator changed. A level set in-game with `!setperm` is never overwritten by a save, restart or deploy. See `ui/admin_permissions.py` for validation and `ui/task_logic/access_permission_sync.py` / `ui/task_logic/permission_read.py` for the write/read paths.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/instances/<int:instance_id>/admins` | GET | The instance's admins, read live from its Redis database |
+
+### Get Instance Admins Response
+
+```json
+{
+  "data": {
+    "admins": [{"steam_id64": "76561198012345678", "level": 5}],
+    "error": null
+  }
+}
+```
+
+- `admins`: every SteamID with a level from 1 to 5 in the instance's Redis database, sorted by SteamID, read over one bounded SSH round trip. `null` when the server could not be read.
+- `error`: why `admins` is `null` (unreachable host, no Redis, etc.), or `null` on a successful read.
+
+### Admin Fields On Other Endpoints
+
+All entries are lists of `{"steam_id64": "76561198...", "level": 0-5}`, de-duplicated by SteamID (last wins); validation rejects, never clamps, an out-of-range or non-numeric level.
+
+- `PUT /instances/<id>/config` accepts `admin_changes`: only the admins changed in the Owner & Admins tab. Each entry's level is written to Redis after the config-apply task succeeds; level `0` removes an admin. Admins not listed are left alone. Omitting the field writes nothing.
+- `POST /instances` (create) accepts `admins`: the full list from the Add Instance form or its preset. The deploy task writes it into the new instance's Redis once, after a successful deploy.
+- Preset create/update accept `admins` and write it to `admins.json` in the preset folder. `GET`/list-preset responses return `admins`; it is `null` when the preset has no `admins.json` (distinct from `[]`). Sending `admins: null` is the same as omitting it.
+
+A failed write (SSH or Redis unreachable) appends a warning to the instance log; the deploy or apply itself still succeeds. The write also deletes any `minqlx:qlsm:managed_admins*` keys left behind by older QLSM versions.
 
 ## Settings
 
