@@ -1,9 +1,10 @@
 import React from 'react';
 import { UserPlus, X } from 'lucide-react';
+import { QuakeColorSpans } from '../rcon/QuakeColoredText';
 
 // One admin in the Owner & Admins list. `row` comes from useInstanceAdmins:
-// {steamId, level}. The directory only supplies a display name -- a
-// SteamID missing from it is shown as itself, never as "Unknown operator".
+// {steamId, level, inGameName}. The directory name wins; otherwise the
+// in-game name minqlx recorded in Redis is shown; otherwise the SteamID.
 //
 // The row carries a data-testid of `admin-row-<steamId>` so a sibling test can
 // target it directly instead of matching text fragmented across the name and
@@ -17,8 +18,14 @@ function AdminRow({ row, operator, onRemove, onAddToDirectory, disabled = false 
       <span className="min-w-0 truncate text-[var(--text-primary)]">
         {/* The name gets its own span so getByText('Vex') can match it -- as a
             bare text node it normalizes to "Vex76561198012345678lvl 3". */}
-        {operator ? <span>{operator.name}</span> : <span className="font-mono">{row.steamId}</span>}
-        {operator && <span className="ml-2 font-mono text-xs text-[var(--text-muted)]">{row.steamId}</span>}
+        {operator
+          ? <span>{operator.name}</span>
+          : row.inGameName
+            ? <span data-testid="admin-in-game-name"><QuakeColorSpans text={row.inGameName} /></span>
+            : <span className="font-mono">{row.steamId}</span>}
+        {(operator || row.inGameName) && (
+          <span className="ml-2 font-mono text-xs text-[var(--text-muted)]">{row.steamId}</span>
+        )}
         <span className="ml-2 text-xs text-[var(--text-muted)]">lvl {row.level}</span>
       </span>
       <span className="flex flex-shrink-0 items-center gap-2">

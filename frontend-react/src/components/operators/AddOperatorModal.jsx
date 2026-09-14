@@ -3,9 +3,12 @@ import { Dialog, DialogBackdrop } from '@headlessui/react';
 import { X, UserPlus, AlertTriangle, LoaderCircle } from 'lucide-react';
 import { STEAMID64_RE } from '../../utils/operatorConfigSync';
 
-// initialSteamId / initialLevel prefill the form each time it opens -- used by
-// the Owner & Admins tab to name an admin that is not in the directory yet.
-function AddOperatorModal({ isOpen, onClose, onSubmit, initialSteamId = '', initialLevel = null }) {
+// initialSteamId / initialLevel / initialName prefill the form each time it
+// opens -- used by the Owner & Admins tab to name an admin that is not in the
+// directory yet. initialName is the admin's in-game name (colors already
+// stripped by the caller) and only fills the field when non-empty, so an
+// admin with no known name still gets a blank field to type into.
+function AddOperatorModal({ isOpen, onClose, onSubmit, initialSteamId = '', initialLevel = null, initialName = '' }) {
   const [name, setName] = useState('');
   const [steamId64, setSteamId64] = useState('');
   const [defaultLevel, setDefaultLevel] = useState('5');
@@ -16,7 +19,8 @@ function AddOperatorModal({ isOpen, onClose, onSubmit, initialSteamId = '', init
     if (!isOpen) return;
     if (initialSteamId) setSteamId64(initialSteamId);
     if (initialLevel != null) setDefaultLevel(String(initialLevel));
-  }, [isOpen, initialSteamId, initialLevel]);
+    if (initialName) setName(initialName);
+  }, [isOpen, initialSteamId, initialLevel, initialName]);
 
   const resetForm = () => {
     setName('');

@@ -3,6 +3,7 @@ import { AlertTriangle, Crown, ExternalLink, RotateCw, ShieldPlus } from 'lucide
 import { createOperator, getOperators } from '../../services/api';
 import { setOperatorsCache } from '../../utils/operatorsCache';
 import { readOwnerFromConfig, writeOwnerToConfig } from '../../utils/operatorConfigSync';
+import { stripQuakeColors } from '../../utils/quakeColors';
 import OperatorCombobox from './OperatorCombobox';
 import AdminRow from './AdminRow';
 import AddOperatorModal from './AddOperatorModal';
@@ -194,6 +195,7 @@ function OwnerAdminEditor({
         onSubmit={handleCreateOperator}
         initialSteamId={directoryRow?.steamId || ''}
         initialLevel={directoryRow?.level ?? null}
+        initialName={stripQuakeColors(directoryRow?.inGameName)}
       />
     </div>
   );

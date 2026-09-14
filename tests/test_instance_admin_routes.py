@@ -22,10 +22,11 @@ def test_returns_the_admins_read_from_redis(client, app):
     with app.app_context():
         instance_id = _seed().id
     admins = [{'steam_id64': '76561198087654321', 'level': 5}]
-    with patch('ui.routes.instance_admin_routes.read_live_admins', return_value=(admins, None)):
+    names = {'76561198087654321': '^1ST01C'}
+    with patch('ui.routes.instance_admin_routes.read_live_admins', return_value=(admins, names, None)):
         response = client.get(f'/api/instances/{instance_id}/admins', headers=headers)
     assert response.status_code == 200
-    assert response.get_json()['data'] == {'admins': admins, 'error': None}
+    assert response.get_json()['data'] == {'admins': admins, 'names': names, 'error': None}
 
 
 def test_unreachable_host_is_200_with_an_error_string(client, app):
@@ -34,11 +35,12 @@ def test_unreachable_host_is_200_with_an_error_string(client, app):
     with app.app_context():
         instance_id = _seed().id
     with patch('ui.routes.instance_admin_routes.read_live_admins',
-               return_value=(None, 'The server is unreachable, so admin levels could not be read.')):
+               return_value=(None, None, 'The server is unreachable, so admin levels could not be read.')):
         response = client.get(f'/api/instances/{instance_id}/admins', headers=headers)
     assert response.status_code == 200
     data = response.get_json()['data']
     assert data['admins'] is None
+    assert data['names'] == {}
     assert 'unreachable' in data['error']
 
 

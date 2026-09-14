@@ -12,8 +12,14 @@ import { getInstanceAdmins } from '../../services/api';
 // `preload`, when given, is an in-flight getInstanceAdmins promise the parent
 // started earlier (Edit Configuration starts it on open). The first load awaits
 // it instead of making its own SSH round trip; Refresh always refetches.
+//
+// `names` (SteamID -> raw colored in-game name from Redis) is kept in its own
+// piece of state, separate from entries, so it can never end up in a saved
+// admin entry ({steam_id64, level}) -- it only ever flows into the derived
+// `rows` for display.
 export default function useInstanceAdmins({ instanceId, active, entries, onChange, onLoaded, preload = null }) {
   const [live, setLive] = useState(null);
+  const [names, setNames] = useState({});
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -31,10 +37,12 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
       const data = await (pending || getInstanceAdmins(instanceId));
       const admins = Array.isArray(data?.admins) ? data.admins : null;
       setLive(admins);
+      setNames(data?.names && typeof data.names === 'object' ? data.names : {});
       setError(admins ? null : (data?.error || 'Could not read the admin list.'));
       if (admins && onLoadedRef.current) onLoadedRef.current(admins);
     } catch (err) {
       setLive(null);
+      setNames({});
       setError(err?.error?.message || 'Could not read the admin list.');
     } finally {
       setLoading(false);
@@ -45,8 +53,10 @@ export default function useInstanceAdmins({ instanceId, active, entries, onChang
 
   const effectiveEntries = useMemo(() => entries ?? live ?? [], [entries, live]);
   const rows = useMemo(
-    () => effectiveEntries.map(({ steam_id64: steamId, level }) => ({ steamId, level })),
-    [effectiveEntries],
+    () => effectiveEntries.map(({ steam_id64: steamId, level }) => ({
+      steamId, level, inGameName: names[steamId] || null,
+    })),
+    [effectiveEntries, names],
   );
 
   const emit = useCallback((next) => { if (onChange) onChange(next); }, [onChange]);
