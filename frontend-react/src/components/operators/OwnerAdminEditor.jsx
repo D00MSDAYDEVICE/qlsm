@@ -91,6 +91,8 @@ function OwnerAdminEditor({
   const assignable = operators.filter((op) => !rows.some((row) => row.steamId === op.steam_id64));
 
   const levelGroups = groupAdminsByLevel(rows);
+  // Count what the cards show: a legacy level-0 preset entry is not an admin.
+  const adminCount = levelGroups.reduce((n, group) => n + group.rows.length, 0);
   const card = 'rounded-xl border border-[var(--surface-border)] bg-[var(--surface-elevated)] p-4';
   const sectionTitle = 'font-display text-sm font-semibold tracking-wider uppercase text-[var(--accent-primary)]';
 
@@ -124,8 +126,8 @@ function OwnerAdminEditor({
           <h3 className={`${sectionTitle} flex items-center gap-1.5`}>
             <ShieldPlus size={15} /> Server Admins
             <span data-testid="admin-count"
-                  className="ml-1 rounded bg-[var(--accent-primary)] px-1.5 py-0.5 font-mono text-xs font-bold text-black">
-              {rows.length}
+                  className="ml-1 rounded bg-[var(--accent-primary)] px-1.5 py-0.5 font-mono text-xs font-bold text-white dark:text-black">
+              {adminCount}
             </span>
           </h3>
           {instanceId && (
