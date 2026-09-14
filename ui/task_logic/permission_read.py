@@ -3,7 +3,9 @@
 The mirror image of access_permission_sync's write path: one bounded SSH
 command running a small python script on the host. SCAN, not KEYS, so a large
 database cannot block Redis. Only levels above 0 come back -- a key set to 0 is
-a revoked admin, not an admin.
+a revoked admin, not an admin. Also reads each admin's last known in-game name
+(`minqlx:players:<steamid>:current_name`, falling back to the newest entry of
+the `minqlx:players:<steamid>` name-history list).
 """
 
 import base64
@@ -23,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 READ_TIMEOUT = SSH_CONNECT_TIMEOUT + 5
 UNREACHABLE_MESSAGE = "The server is unreachable, so admin levels could not be read."
+NAME_MAX_LENGTH = 64
 
 
 def _remote_read_script(db, redis_password):
@@ -52,7 +55,28 @@ for key in client.scan_iter(match="minqlx:players:*:permission", count=500):
     except (TypeError, ValueError):
         continue
 
-print(json.dumps({{"levels": levels}}))
+names = {{}}
+try:
+    admin_ids = [sid for sid, level in levels.items() if level > 0]
+    if admin_ids:
+        current = client.mget(["minqlx:players:%s:current_name" % sid for sid in admin_ids])
+        missing = []
+        for sid, raw_name in zip(admin_ids, current):
+            if raw_name:
+                names[sid] = raw_name.decode("utf-8", "replace") if isinstance(raw_name, bytes) else raw_name
+            else:
+                missing.append(sid)
+        if missing:
+            pipe = client.pipeline()
+            for sid in missing:
+                pipe.lindex("minqlx:players:%s" % sid, 0)
+            for sid, raw_name in zip(missing, pipe.execute()):
+                if raw_name:
+                    names[sid] = raw_name.decode("utf-8", "replace") if isinstance(raw_name, bytes) else raw_name
+except Exception:
+    names = {{}}
+
+print(json.dumps({{"levels": levels, "names": names}}))
 '''
 
 
@@ -60,13 +84,26 @@ def build_read_command(host, db, redis_password=None):
     return build_ssh_python_command(host, _remote_read_script(db, redis_password))
 
 
+def _names_for(admins, raw_names):
+    """Only non-empty string names of SteamIDs in `admins`, capped in length."""
+    if not isinstance(raw_names, dict):
+        return {}
+    admin_ids = {a["steam_id64"] for a in admins}
+    return {
+        steam_id: name[:NAME_MAX_LENGTH]
+        for steam_id, name in raw_names.items()
+        if steam_id in admin_ids and isinstance(name, str) and name
+    }
+
+
 def read_live_admins(instance):
-    """(admins, error). admins is [{'steam_id64', 'level'}] sorted by SteamID,
-    levels 1-5 only; (None, message) when the server could not be read and
-    (None, None) when the instance has no host."""
+    """(admins, names, error). admins is [{'steam_id64', 'level'}] sorted by
+    SteamID, levels 1-5 only; names maps those SteamIDs to their last in-game
+    name where minqlx recorded one. (None, None, message) when the server could
+    not be read and (None, None, None) when the instance has no host."""
     host = getattr(instance, "host", None)
     if host is None:
-        return None, None
+        return None, None, None
 
     command = build_read_command(
         host, resolve_redis_db(instance), redis_password=redis_password_for_host(host)
@@ -76,18 +113,19 @@ def read_live_admins(instance):
         result = subprocess.run(command, capture_output=True, text=True, timeout=READ_TIMEOUT)
     except subprocess.TimeoutExpired:
         logger.warning("Timed out reading admin levels for instance %s", instance_id)
-        return None, UNREACHABLE_MESSAGE
+        return None, None, UNREACHABLE_MESSAGE
     except Exception:
         logger.exception("Failed to read admin levels for instance %s", instance_id)
-        return None, UNREACHABLE_MESSAGE
+        return None, None, UNREACHABLE_MESSAGE
 
     if result.returncode != 0:
         logger.warning("Admin level read failed for instance %s: %s",
                        instance_id, (result.stderr or "")[:200])
-        return None, UNREACHABLE_MESSAGE
+        return None, None, UNREACHABLE_MESSAGE
 
     try:
-        levels = json.loads(result.stdout).get("levels") or {}
+        payload = json.loads(result.stdout)
+        levels = payload.get("levels") or {}
         # A key that is not a SteamID must never reach the client: it would
         # then fail validation and block the whole config save.
         admins = [
@@ -97,5 +135,7 @@ def read_live_admins(instance):
         ]
     except (AttributeError, json.JSONDecodeError, TypeError, ValueError):
         logger.warning("Admin level read returned unparseable output for instance %s", instance_id)
-        return None, UNREACHABLE_MESSAGE
-    return sorted(admins, key=lambda a: a["steam_id64"]), None
+        return None, None, UNREACHABLE_MESSAGE
+
+    admins = sorted(admins, key=lambda a: a["steam_id64"])
+    return admins, _names_for(admins, payload.get("names")), None

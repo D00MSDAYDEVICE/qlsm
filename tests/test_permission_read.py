@@ -32,26 +32,68 @@ def test_returns_admins_sorted_and_drops_level_zero_and_junk_keys(monkeypatch):
         "76561198087654321": 5, "76561198012345678": 3,
         "76561198000000001": 0, "bot-17": 5, "76561198000000002": 9,
     }}))
-    admins, error = mod.read_live_admins(_instance(host=_host()))
+    admins, names, error = mod.read_live_admins(_instance(host=_host()))
     assert admins == [
         {"steam_id64": "76561198012345678", "level": 3},
         {"steam_id64": "76561198087654321", "level": 5},
     ]
+    assert names == {}
     assert error is None
+
+
+def test_returns_names_only_for_listed_admins(monkeypatch):
+    _stub_run(monkeypatch, stdout=json.dumps({
+        "levels": {"76561198087654321": 5, "76561198012345678": 3, "76561198000000001": 0},
+        "names": {
+            "76561198087654321": "^1ST01C",
+            "76561198012345678": "",
+            "76561198000000001": "revoked",
+            "bot-17": "junk",
+        },
+    }))
+    admins, names, error = mod.read_live_admins(_instance(host=_host()))
+    assert names == {"76561198087654321": "^1ST01C"}
+    assert error is None
+
+
+def test_long_or_non_string_names_are_capped_or_dropped(monkeypatch):
+    _stub_run(monkeypatch, stdout=json.dumps({
+        "levels": {"76561198087654321": 5, "76561198012345678": 3},
+        "names": {"76561198087654321": "x" * 200, "76561198012345678": 42},
+    }))
+    _, names, _ = mod.read_live_admins(_instance(host=_host()))
+    assert names == {"76561198087654321": "x" * 64}
+
+
+def test_unparseable_names_do_not_fail_the_read(monkeypatch):
+    _stub_run(monkeypatch, stdout=json.dumps({
+        "levels": {"76561198087654321": 5}, "names": ["not", "a", "dict"],
+    }))
+    admins, names, error = mod.read_live_admins(_instance(host=_host()))
+    assert admins == [{"steam_id64": "76561198087654321", "level": 5}]
+    assert names == {}
+    assert error is None
+
+
+def test_read_script_fetches_current_name_with_list_fallback():
+    script = shlex.split(mod.build_read_command(_host(), 2)[-1])[2]
+    assert ":current_name" in script
+    assert "lindex" in script
+    compile(script, "<remote>", "exec")  # remote script must be valid python
 
 
 def test_ssh_failure_and_timeout_report_unreachable(monkeypatch):
     _stub_run(monkeypatch, returncode=255, stderr="No route to host")
-    admins, error = mod.read_live_admins(_instance(host=_host()))
-    assert admins is None and "unreachable" in error.lower()
+    admins, names, error = mod.read_live_admins(_instance(host=_host()))
+    assert admins is None and names is None and "unreachable" in error.lower()
 
     def boom(*args, **kwargs):
         raise subprocess.TimeoutExpired(cmd="ssh", timeout=10)
 
     monkeypatch.setattr(mod.subprocess, "run", boom)
-    admins, error = mod.read_live_admins(_instance(host=_host()))
-    assert admins is None and error
+    admins, names, error = mod.read_live_admins(_instance(host=_host()))
+    assert admins is None and names is None and error
 
 
 def test_no_host_is_not_an_error():
-    assert mod.read_live_admins(_instance(host=None)) == (None, None)
+    assert mod.read_live_admins(_instance(host=None)) == (None, None, None)
