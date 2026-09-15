@@ -81,8 +81,15 @@ def create_plugin_repository():
     if url_error:
         return jsonify({'error': {'message': url_error}}), 400
 
-    if PluginRepository.query.filter_by(name=name).first():
+    # Names compare case-insensitively and URLs ignore a trailing slash, so
+    # 'Test' vs 'test' or '.../repo' vs '.../repo/' don't add a second card
+    # for the same repository.
+    existing = PluginRepository.query.all()
+    if any(r.name.lower() == name.lower() for r in existing):
         return jsonify({'error': {'message': f"Repository '{name}' already exists."}}), 409
+    same_url = next((r for r in existing if r.url.rstrip('/') == url.rstrip('/')), None)
+    if same_url:
+        return jsonify({'error': {'message': f"This URL is already added as '{same_url.name}'."}}), 409
 
     repo = PluginRepository(name=name, url=url)
     _sync(repo)

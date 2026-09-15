@@ -110,6 +110,33 @@ def test_create_repository_rejects_duplicate_name(client, app, monkeypatch):
     assert response.status_code == 409
 
 
+def test_create_repository_rejects_duplicate_name_ignoring_case(client, app, monkeypatch):
+    _patch_fetch(monkeypatch)
+    make_user(app, 'creator5', 'creatorpass')
+    headers = auth_headers(app, 'creator5')
+    client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'Dup', 'url': 'https://example.com/a',
+    })
+    response = client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'dup', 'url': 'https://example.com/b',
+    })
+    assert response.status_code == 409
+
+
+def test_create_repository_rejects_duplicate_url_ignoring_trailing_slash(client, app, monkeypatch):
+    _patch_fetch(monkeypatch)
+    make_user(app, 'creator6', 'creatorpass')
+    headers = auth_headers(app, 'creator6')
+    client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'First', 'url': 'https://example.com/a',
+    })
+    response = client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'Second', 'url': 'https://example.com/a/',
+    })
+    assert response.status_code == 409
+    assert "'First'" in response.get_json()['error']['message']
+
+
 # --- POST /api/plugin-repositories/<id>/sync ---
 
 def test_sync_updates_plugin_list(client, app, monkeypatch):
