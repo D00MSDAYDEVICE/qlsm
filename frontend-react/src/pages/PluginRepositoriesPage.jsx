@@ -15,13 +15,13 @@ import AddPluginRepositoryModal from '../components/pluginRepositories/AddPlugin
 import { formatDateTime } from '../utils/uiUtils';
 import { RUNTIME_OPTIONS } from '../constants/runtimes';
 
-// One repository's plugin list: expand/collapse, per-plugin checkboxes, and
-// the runtime a download without its own declared runtime falls back to.
+// One repository's plugin list: expand/collapse, per-plugin checkboxes, and a
+// per-plugin runtime pick for selected entries that declare no runtime.
 function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing }) {
   const [expanded, setExpanded] = useState(false);
   const [checked, setChecked] = useState(new Set());
   const [downloading, setDownloading] = useState(false);
-  const [fallbackRuntime, setFallbackRuntime] = useState('');
+  const [pickedRuntimes, setPickedRuntimes] = useState({});
   // Filenames a download attempt reported as already present in the local
   // pool ({ code: 'exists' } from the backend) -- offered as an overwrite
   // confirm rather than a dead-end error, since that's the one failure mode
@@ -69,7 +69,9 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
   const runDownload = async (filenames, overwrite = false) => {
     setDownloading(true);
     try {
-      const result = await downloadPluginRepositoryPlugins(repo.id, filenames, fallbackRuntime || null, overwrite);
+      const runtimes = {};
+      filenames.forEach(f => { if (pickedRuntimes[f]) runtimes[f] = pickedRuntimes[f]; });
+      const result = await downloadPluginRepositoryPlugins(repo.id, filenames, runtimes, overwrite);
       reportResult(result);
     } catch (err) {
       // A request where every file failed lands here (non-2xx), but the
@@ -85,8 +87,14 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
     }
   };
 
+  // Selected plugins that declare no runtime and have no pick yet -- Download
+  // stays disabled until each one has a runtime.
+  const missingRuntime = repo.plugins
+    .filter(p => checked.has(p.filename) && !p.runtime && !pickedRuntimes[p.filename])
+    .map(p => p.filename);
+
   const handleDownload = () => {
-    if (checked.size === 0) return;
+    if (checked.size === 0 || missingRuntime.length) return;
     runDownload([...checked]);
   };
 
@@ -178,7 +186,28 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
                         )}
                       </td>
                       <td className="users-td">
-                        <span className="font-mono text-xs">{plugin.runtime || '—'}</span>
+                        {plugin.runtime ? (
+                          <span className="font-mono text-xs">{plugin.runtime}</span>
+                        ) : checked.has(plugin.filename) ? (
+                          <select
+                            value={pickedRuntimes[plugin.filename] || ''}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setPickedRuntimes(prev => ({ ...prev, [plugin.filename]: value }));
+                            }}
+                            aria-label={`Runtime for ${plugin.filename}`}
+                            className="input-base text-xs py-1"
+                          >
+                            <option value="">Pick runtime...</option>
+                            {RUNTIME_OPTIONS.map((opt) => (
+                              <option key={opt.id} value={opt.id}>{opt.name}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-xs text-[var(--text-muted)]" title="This plugin doesn't declare a runtime. Select it to pick one.">
+                            not declared
+                          </span>
+                        )}
                       </td>
                       <td className="users-td">
                         {plugin.version_risk ? (
@@ -197,20 +226,9 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
               </table>
 
               <div className="flex items-center gap-3 mt-3">
-                <select
-                  value={fallbackRuntime}
-                  onChange={(e) => setFallbackRuntime(e.target.value)}
-                  className="input-base text-sm"
-                  title="Used only for a selected plugin whose manifest entry has no runtime of its own."
-                >
-                  <option value="">Runtime for entries without one...</option>
-                  {RUNTIME_OPTIONS.map((opt) => (
-                    <option key={opt.id} value={opt.id}>{opt.name}</option>
-                  ))}
-                </select>
                 <button
                   onClick={handleDownload}
-                  disabled={checked.size === 0 || downloading}
+                  disabled={checked.size === 0 || missingRuntime.length > 0 || downloading}
                   className="btn btn-primary"
                 >
                   {downloading ? (
@@ -220,6 +238,11 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
                   )}
                   Download selected ({checked.size})
                 </button>
+                {missingRuntime.length > 0 && (
+                  <span className="text-xs text-[var(--text-muted)]">
+                    Pick a runtime for {missingRuntime.join(', ')}
+                  </span>
+                )}
               </div>
             </>
           )}

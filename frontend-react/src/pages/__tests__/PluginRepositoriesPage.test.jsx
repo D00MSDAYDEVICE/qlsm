@@ -77,7 +77,7 @@ describe('PluginRepositoriesPage downloads', () => {
     fireEvent.click(screen.getByRole('button', { name: /^overwrite$/i }));
 
     await waitFor(() => {
-      expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenLastCalledWith(1, ['balance2.py'], null, true);
+      expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenLastCalledWith(1, ['balance2.py'], {}, true);
     });
     await waitFor(() => {
       expect(mocks.showSuccess).toHaveBeenCalledWith(expect.stringContaining('Downloaded 1'));
@@ -96,5 +96,41 @@ describe('PluginRepositoriesPage downloads', () => {
       expect(mocks.showError).toHaveBeenCalledWith(expect.stringContaining('balance2.py: boom'));
     });
     expect(mocks.showError).not.toHaveBeenCalledWith('Failed to download plugins.');
+  });
+
+  it('asks for a runtime only on a selected plugin that declares none, and sends it per file', async () => {
+    mocks.getPluginRepositories.mockResolvedValue([{
+      ...REPO,
+      plugins: [
+        ...REPO.plugins,
+        {
+          filename: 'no_runtime.py', label: 'No Runtime', description: null,
+          runtime: null, requires_qlsm_version: null, version_risk: null,
+        },
+      ],
+    }]);
+    mocks.downloadPluginRepositoryPlugins.mockResolvedValueOnce({ downloaded: ['balance2.py', 'no_runtime.py'], errors: [] });
+
+    render(<PluginRepositoriesPage />);
+    fireEvent.click(await screen.findByText('Repo A'));
+    const [balanceBox, noRuntimeBox] = await screen.findAllByRole('checkbox');
+
+    fireEvent.click(balanceBox);
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+
+    fireEvent.click(noRuntimeBox);
+    const download = screen.getByRole('button', { name: /download selected/i });
+    expect(download).toBeDisabled();
+    expect(screen.getByText(/pick a runtime for no_runtime\.py/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Runtime for no_runtime.py' }), { target: { value: 'minqlxtended' } });
+    expect(download).not.toBeDisabled();
+    fireEvent.click(download);
+
+    await waitFor(() => {
+      expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenCalledWith(
+        1, ['balance2.py', 'no_runtime.py'], { 'no_runtime.py': 'minqlxtended' }, false,
+      );
+    });
   });
 });

@@ -144,10 +144,9 @@ def download_plugin_repository_plugins(repo_id):
     """Download the operator's selected filenames from this repo into the
     local pool. Each entry in `filenames` needs a `runtime` to resolve which
     pool it lands in -- the manifest's own declared runtime (looked up from
-    the last synced list) when it has one, else the request's `runtime` as a
-    fallback, since a repo entry may leave `runtime` unset. The fallback never
-    overrides a declared runtime: in a mixed selection it would otherwise put
-    a minqlxtended plugin into the minqlx pool (or vice versa). `overwrite: true` in the body is required to
+    the last synced list) when it has one, else the operator's pick for that
+    file in `runtimes` ({filename: runtime}), since a repo entry may leave
+    `runtime` unset. A pick never overrides a declared runtime. `overwrite: true` in the body is required to
     replace a pool file that already exists -- see download_plugin()."""
     repo = db.session.get(PluginRepository, repo_id)
     if not repo:
@@ -157,9 +156,12 @@ def download_plugin_repository_plugins(repo_id):
     if not data or not isinstance(data.get('filenames'), list) or not data['filenames']:
         return jsonify({'error': {'message': 'filenames must be a non-empty list of strings.'}}), 400
 
-    fallback_runtime = data.get('runtime')
-    if fallback_runtime is not None and not is_valid_runtime(fallback_runtime):
-        return jsonify({'error': {'message': f"Unknown runtime: {fallback_runtime!r}"}}), 400
+    picked_runtimes = data.get('runtimes') or {}
+    if not isinstance(picked_runtimes, dict):
+        return jsonify({'error': {'message': 'runtimes must be an object of filename -> runtime.'}}), 400
+    for picked in picked_runtimes.values():
+        if not is_valid_runtime(picked):
+            return jsonify({'error': {'message': f"Unknown runtime: {picked!r}"}}), 400
 
     overwrite = bool(data.get('overwrite'))
 
@@ -174,11 +176,11 @@ def download_plugin_repository_plugins(repo_id):
             continue
         entry = known_by_filename.get(filename)
         declared_runtime = (entry or {}).get('runtime')
-        runtime = declared_runtime if is_valid_runtime(declared_runtime) else fallback_runtime
+        runtime = declared_runtime if is_valid_runtime(declared_runtime) else picked_runtimes.get(filename)
         if not is_valid_runtime(runtime):
             errors.append({
                 'filename': filename,
-                'error': 'No runtime declared for this plugin and none was given in the request.',
+                'error': 'No runtime declared for this plugin. Pick one for it before downloading.',
             })
             continue
         try:

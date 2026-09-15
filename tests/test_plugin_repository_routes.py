@@ -214,12 +214,12 @@ def test_download_requires_a_runtime_when_manifest_has_none(client, app, monkeyp
     assert response.get_json()['errors'][0]['filename'] == 'no_runtime.py'
 
 
-def test_download_fallback_runtime_does_not_override_declared_runtime(client, app, monkeypatch):
+def test_download_picked_runtime_does_not_override_declared_runtime(client, app, monkeypatch):
     make_user(app, 'dloverride', 'password123')
     headers = auth_headers(app, 'dloverride')
     with app.app_context():
-        # One entry declares minqlx, the other declares nothing; the request's
-        # runtime must only fill in the missing one.
+        # One entry declares minqlx, the other declares nothing; a per-file
+        # pick must only fill in the missing one.
         repo = _seeded_repo('Repo G', 'https://example.com/g', plugins=[
             {'filename': 'balance2.py', 'label': None, 'description': None,
              'runtime': 'minqlx', 'requires_qlsm_version': None},
@@ -235,13 +235,30 @@ def test_download_fallback_runtime_does_not_override_declared_runtime(client, ap
     )
     response = client.post(
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
-        json={'filenames': ['balance2.py', 'no_runtime.py'], 'runtime': 'minqlxtended'},
+        json={
+            'filenames': ['balance2.py', 'no_runtime.py'],
+            'runtimes': {'balance2.py': 'minqlxtended', 'no_runtime.py': 'minqlxtended'},
+        },
     )
     assert response.status_code == 200
     assert calls == [
         ('https://example.com/g', 'balance2.py', 'minqlx'),
         ('https://example.com/g', 'no_runtime.py', 'minqlxtended'),
     ]
+
+
+def test_download_rejects_an_unknown_picked_runtime(client, app):
+    make_user(app, 'dlbadpick', 'password123')
+    headers = auth_headers(app, 'dlbadpick')
+    with app.app_context():
+        repo = _seeded_repo('Repo H', 'https://example.com/h')
+        repo_id = repo.id
+
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py'], 'runtimes': {'balance2.py': 'quake3'}},
+    )
+    assert response.status_code == 400
 
 
 def test_download_partial_failure_returns_207(client, app, monkeypatch):

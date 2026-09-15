@@ -881,10 +881,12 @@ export const deletePluginRepository = async (repoId) => {
   }
 };
 
-export const downloadPluginRepositoryPlugins = async (repoId, filenames, runtime = null, overwrite = false) => {
+// `runtimes` maps filename -> runtime for plugins whose repo entry declares
+// none; a declared runtime always wins on the backend.
+export const downloadPluginRepositoryPlugins = async (repoId, filenames, runtimes = {}, overwrite = false) => {
   try {
     const payload = { filenames };
-    if (runtime) payload.runtime = runtime;
+    if (Object.keys(runtimes).length) payload.runtimes = runtimes;
     if (overwrite) payload.overwrite = true;
     const response = await apiClient.post(`/plugin-repositories/${repoId}/download`, payload);
     return response.data;
