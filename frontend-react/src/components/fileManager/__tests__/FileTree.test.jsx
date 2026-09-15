@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -160,6 +161,41 @@ describe('FileTree', () => {
       renderPluginTree();
       expect(screen.getAllByRole('checkbox')).toHaveLength(1);
       expect(screen.queryByTestId('plugin-hint-essentials.py')).not.toBeInTheDocument();
+    });
+
+    it('marks a shared plugin row and keeps it enableable', () => {
+      render(
+        <FolderHarness
+          files={[{ name: 'hello_qlsm.py', path: 'hello_qlsm.py', type: 'file', shared: true }]}
+          foldersEnabled
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+        />,
+      );
+
+      expect(screen.getByTestId('plugin-shared-hello_qlsm.py')).toHaveTextContent(/shared/i);
+      expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    });
+
+    it('disables rename and delete on a shared plugin row', async () => {
+      render(
+        <FolderHarness
+          files={[{ name: 'hello_qlsm.py', path: 'hello_qlsm.py', type: 'file', shared: true }]}
+          foldersEnabled
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+        />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /file actions/i }));
+
+      const rename = await screen.findByRole('menuitem', { name: /rename/i });
+      expect(rename).toHaveAttribute('aria-disabled', 'true');
+      expect(screen.getByRole('menuitem', { name: /delete/i })).toHaveAttribute('aria-disabled', 'true');
     });
 
     it('replaces the checkbox with a hint on __init__.py', () => {

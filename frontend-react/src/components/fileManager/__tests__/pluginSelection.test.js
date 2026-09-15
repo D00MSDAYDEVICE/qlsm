@@ -131,6 +131,12 @@ describe('resolveRootPluginPaths', () => {
     { name: '__init__.py', path: '__init__.py', type: 'file' },
   ];
 
+  it('resolves a name that exists only as a shared pool row', () => {
+    const withShared = [...tree, { name: 'kickban.py', path: 'kickban.py', type: 'file', shared: true }];
+    const { paths } = resolveRootPluginPaths(withShared, ['kickban']);
+    expect(paths).toEqual(['kickban.py']);
+  });
+
   it('resolves bare names to root-level paths only', () => {
     const { paths } = resolveRootPluginPaths(tree, ['balance', 'essentials']);
     expect(paths.sort()).toEqual(['balance.py', 'essentials.py']);

@@ -28,6 +28,7 @@ from ui.preset_support import (
 from ui.runtime import is_valid_runtime, normalize_runtime
 from ui.font_files import FONT_EXTENSIONS, MAX_FONT_FILE_SIZE, validate_font_content
 from ui.plugin_manifest import read_plugin_manifest
+from ui.plugin_pool import shared_plugin_nodes, shared_plugin_path
 
 draft_api_bp = Blueprint('draft_api_routes', __name__)
 
@@ -746,8 +747,22 @@ def get_draft_tree(draft_id):
     # through to _pool_dirs()'s minqlx-first default even for a minqlxtended
     # draft. draft_effective_runtime() is set on every draft that knew its
     # runtime at creation.
-    tree = _build_draft_tree(scripts_path, runtime=draft_effective_runtime(draft_id))
+    runtime = draft_effective_runtime(draft_id)
+    tree = _build_draft_tree(scripts_path, runtime=runtime)
+    # Root plugins from the runtime's shared pool that the draft doesn't hold
+    # itself: deploy backfills them onto the instance, so they're enableable
+    # here too. Marked `shared`; editing one writes a local copy (PUT content).
+    root_names = {item['name'] for item in tree}
+    tree.extend(shared_plugin_nodes(runtime, root_names, read_plugin_manifest))
     return jsonify({"data": tree}), 200
+
+
+def _shared_fallback_path(draft_id, full_path, path):
+    """Pool path to serve read-only when the draft has no file at `path` but
+    it names a shared plugin for the draft's runtime, else None."""
+    if os.path.exists(full_path):
+        return None
+    return shared_plugin_path(draft_effective_runtime(draft_id), path)
 
 
 @draft_api_bp.route('/<draft_id>/content', methods=['GET'])
@@ -772,6 +787,7 @@ def get_draft_content(draft_id):
         return jsonify({"error": {"message": f"Cannot read {ext} files as text. Only .py and .txt are readable."}}), 400
 
     full_path = os.path.join(scripts_path, path)
+    full_path = _shared_fallback_path(draft_id, full_path, path) or full_path
     if not os.path.exists(full_path):
         return jsonify({"error": {"message": "File not found"}}), 404
 
@@ -803,6 +819,7 @@ def download_draft_file(draft_id):
     full_path = os.path.realpath(os.path.join(scripts_path, *path.split('/')))
     if not _is_safe_draft_path(scripts_path, path):
         return jsonify({"error": {"message": "Invalid file path"}}), 400
+    full_path = _shared_fallback_path(draft_id, full_path, path) or full_path
     if not os.path.isfile(full_path):
         return jsonify({"error": {"message": "File not found"}}), 404
 

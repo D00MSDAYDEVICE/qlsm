@@ -28,7 +28,8 @@ import re
 
 import requests
 
-from ui.runtime import is_valid_runtime, runtime_paths
+from ui.plugin_pool import pool_dir as shared_pool_dir
+from ui.runtime import is_valid_runtime
 
 MANIFEST_FILENAME = 'qlsm-plugins.json'
 MANIFEST_MAX_SIZE = 256 * 1024
@@ -163,10 +164,6 @@ def version_risk(requires_qlsm_version, current_qlsm_version=None):
     }
 
 
-def _pool_dir(runtime):
-    return os.path.abspath(os.path.join('ql-assets', 'data', runtime_paths(runtime)['asset_plugins_dir']))
-
-
 def download_plugin(base_url, filename, runtime, overwrite=False):
     """Fetch <base_url>/<filename> (and its `.ql-plugin.json` sidecar, if the
     repo ships one) over HTTP and write them into the local pool for
@@ -183,7 +180,7 @@ def download_plugin(base_url, filename, runtime, overwrite=False):
     if not _FILENAME_RE.match(filename):
         raise PluginRepositoryError(f"Refusing to download unsafe filename: {filename!r}")
 
-    pool_dir = _pool_dir(runtime)
+    pool_dir = shared_pool_dir(runtime)
     os.makedirs(pool_dir, exist_ok=True)
     dest_path = os.path.join(pool_dir, filename)
     if os.path.exists(dest_path) and not overwrite:

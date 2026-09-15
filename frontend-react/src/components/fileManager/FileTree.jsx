@@ -20,6 +20,8 @@ const FILE_TYPE_ICONS = {
   font: Type,
 };
 
+const SHARED_PLUGIN_TITLE = "From the shared plugin folder. Editing it saves a copy for this configuration.";
+
 const FILE_TYPE_COLORS = {
   python: 'text-blue-400',
   text: 'text-gray-400',
@@ -186,6 +188,15 @@ function TreeItem({
           {item.protected && (
             <Lock className="w-3 h-3 flex-shrink-0 text-[var(--text-muted)]" />
           )}
+          {item.shared && (
+            <span
+              className="flex-shrink-0 rounded border border-[var(--surface-border)] px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]"
+              title={SHARED_PLUGIN_TITLE}
+              data-testid={`plugin-shared-${item.path}`}
+            >
+              shared
+            </span>
+          )}
         </button>
         {pluginCvars.length > 0 && (
           <button
@@ -202,6 +213,7 @@ function TreeItem({
           itemType={item.type}
           fileType={fileType}
           isProtected={!!item.protected}
+          isShared={!!item.shared}
           isMaxDepth={isFolder && item.path.split('/').length >= MAX_CONFIG_FOLDER_DEPTH}
           capabilities={capabilities}
           onDownload={() => rowMenuHandlers.onDownload(item)}

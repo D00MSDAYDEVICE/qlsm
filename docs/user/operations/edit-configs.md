@@ -161,6 +161,17 @@ The `Plugins` tab manages Python plugins for this instance:
 
 ![](../images/plugins.png)
 
+### Shared Plugins
+
+The list also includes plugins from QLSM's shared plugin folder for the host's runtime (`ql-assets/data/minqlx-plugins/` or `ql-assets/data/minqlxtended-plugins/`) that this instance or preset doesn't have its own copy of. They're marked **shared**. That covers plugins you download from a [plugin repository](plugin-repositories.md).
+
+- Tick a shared plugin like any other. Deploying copies it from the host's shared folder into the instance.
+- A new shared plugin must reach the host first: run [Check for Updates](check-for-updates.md) on the host after downloading it. Otherwise the server can't find it when it starts.
+- Shared plugins can't be renamed or deleted here, but you can view their code.
+- Editing a shared plugin's code saves a copy into this instance or preset. The row then loses its **shared** mark, and this configuration keeps its own copy instead of receiving updates to the shared one.
+- When the instance or preset has its own file with the same name, only that copy is listed.
+- The Add Instance form lists shared plugins once a host is selected, since the host decides the runtime.
+
 Use **New**, **Upload**, **Rename**, and **Delete** to stage plugin file changes. Plugin changes are saved through a draft workspace while the modal or deploy form is open; they are committed to the instance or preset only when you save, update, or create.
 
 `.so` files are shown as binary files instead of text. You can replace the binary and add a short description so the file is easier to identify later.
