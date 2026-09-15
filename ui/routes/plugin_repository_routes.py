@@ -143,9 +143,11 @@ def delete_plugin_repository(repo_id):
 def download_plugin_repository_plugins(repo_id):
     """Download the operator's selected filenames from this repo into the
     local pool. Each entry in `filenames` needs a `runtime` to resolve which
-    pool it lands in -- either the manifest's own declared runtime (looked up
-    from the last synced list) or an explicit override, since a repo entry
-    may leave `runtime` unset. `overwrite: true` in the body is required to
+    pool it lands in -- the manifest's own declared runtime (looked up from
+    the last synced list) when it has one, else the request's `runtime` as a
+    fallback, since a repo entry may leave `runtime` unset. The fallback never
+    overrides a declared runtime: in a mixed selection it would otherwise put
+    a minqlxtended plugin into the minqlx pool (or vice versa). `overwrite: true` in the body is required to
     replace a pool file that already exists -- see download_plugin()."""
     repo = db.session.get(PluginRepository, repo_id)
     if not repo:
@@ -155,9 +157,9 @@ def download_plugin_repository_plugins(repo_id):
     if not data or not isinstance(data.get('filenames'), list) or not data['filenames']:
         return jsonify({'error': {'message': 'filenames must be a non-empty list of strings.'}}), 400
 
-    override_runtime = data.get('runtime')
-    if override_runtime is not None and not is_valid_runtime(override_runtime):
-        return jsonify({'error': {'message': f"Unknown runtime: {override_runtime!r}"}}), 400
+    fallback_runtime = data.get('runtime')
+    if fallback_runtime is not None and not is_valid_runtime(fallback_runtime):
+        return jsonify({'error': {'message': f"Unknown runtime: {fallback_runtime!r}"}}), 400
 
     overwrite = bool(data.get('overwrite'))
 
@@ -171,7 +173,8 @@ def download_plugin_repository_plugins(repo_id):
             errors.append({'filename': filename, 'error': 'Not a string.'})
             continue
         entry = known_by_filename.get(filename)
-        runtime = override_runtime or (entry or {}).get('runtime')
+        declared_runtime = (entry or {}).get('runtime')
+        runtime = declared_runtime if is_valid_runtime(declared_runtime) else fallback_runtime
         if not is_valid_runtime(runtime):
             errors.append({
                 'filename': filename,

@@ -214,12 +214,18 @@ def test_download_requires_a_runtime_when_manifest_has_none(client, app, monkeyp
     assert response.get_json()['errors'][0]['filename'] == 'no_runtime.py'
 
 
-def test_download_override_runtime_wins_over_manifest(client, app, monkeypatch):
+def test_download_fallback_runtime_does_not_override_declared_runtime(client, app, monkeypatch):
     make_user(app, 'dloverride', 'password123')
     headers = auth_headers(app, 'dloverride')
     with app.app_context():
-        # Manifest says minqlx; the request below overrides to minqlxtended.
-        repo = _seeded_repo('Repo G', 'https://example.com/g')
+        # One entry declares minqlx, the other declares nothing; the request's
+        # runtime must only fill in the missing one.
+        repo = _seeded_repo('Repo G', 'https://example.com/g', plugins=[
+            {'filename': 'balance2.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None},
+            {'filename': 'no_runtime.py', 'label': None, 'description': None,
+             'runtime': None, 'requires_qlsm_version': None},
+        ])
         repo_id = repo.id
 
     calls = []
@@ -229,10 +235,13 @@ def test_download_override_runtime_wins_over_manifest(client, app, monkeypatch):
     )
     response = client.post(
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
-        json={'filenames': ['balance2.py'], 'runtime': 'minqlxtended'},
+        json={'filenames': ['balance2.py', 'no_runtime.py'], 'runtime': 'minqlxtended'},
     )
     assert response.status_code == 200
-    assert calls == [('https://example.com/g', 'balance2.py', 'minqlxtended')]
+    assert calls == [
+        ('https://example.com/g', 'balance2.py', 'minqlx'),
+        ('https://example.com/g', 'no_runtime.py', 'minqlxtended'),
+    ]
 
 
 def test_download_partial_failure_returns_207(client, app, monkeypatch):
