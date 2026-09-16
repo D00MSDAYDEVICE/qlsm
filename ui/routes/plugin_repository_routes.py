@@ -184,12 +184,15 @@ def download_plugin_repository_plugins(repo_id):
     pool it lands in -- the manifest's own declared runtime (looked up from
     the last synced list) when it has one, else the operator's pick for that
     file in `runtimes` ({filename: runtime}), since a repo entry may leave
-    `runtime` unset. A pick never overrides a declared runtime. The repo manifest is
-    re-fetched once per request so each plugin's inline metadata (label/description/
-    cvars/commands) matches the file downloaded; that fresh list feeds metadata only,
-    and a plugin missing from it (or a failed fetch) falls back to the last-synced
-    entry. `overwrite: true` in the body is required to
-    replace a pool file that already exists -- see download_plugin()."""
+    `runtime` unset. A pick never overrides a declared runtime.
+
+    The repo manifest is re-fetched once per request so each plugin's inline
+    metadata (label/description/cvars/commands) matches the file downloaded;
+    that fresh list feeds metadata only, and a plugin missing from it (or a
+    failed fetch) falls back to the last-synced entry.
+
+    `overwrite: true` in the body is required to replace a pool file that
+    already exists -- see download_plugin()."""
     repo = db.session.get(PluginRepository, repo_id)
     if not repo:
         return jsonify({'error': {'message': 'Repository not found.'}}), 404
