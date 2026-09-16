@@ -1,9 +1,0 @@
-{
-  "label": "Hello QLSM",
-  "description": "Replies to !hello with a configurable greeting.",
-  "commands": [ { "name": "hello", "description": "Reply with the greeting" } ],
-  "cvars": [
-    { "cvar": "qlx_helloGreeting", "label": "Greeting", "type": "string", "default": "Hello from QLSM!" },
-    { "cvar": "qlx_helloEnabled", "label": "Enabled", "type": "bool", "default": true }
-  ]
-}

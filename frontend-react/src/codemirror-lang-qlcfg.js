@@ -305,7 +305,12 @@ export function commandCompletionOptions(prefix) {
         description: command.description,
         sourceNote: 'Source: verified Quake Live console command reference.',
       }),
-    }));
+    }))
+    // Both completion sources pass `filter: false`, so CodeMirror preserves
+    // this order and never reads `boost` itself -- without sorting here, a
+    // prefix match is not hoisted above a mid-name one. Mirrors
+    // cvarCompletionOptions.
+    .sort((left, right) => (right.boost || 0) - (left.boost || 0));
 }
 
 // Suggests cvar names right after `set ` / `seta `, or console commands at the

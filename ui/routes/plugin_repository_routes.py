@@ -10,6 +10,7 @@ from ui.plugin_repositories import (
     PluginRepositoryError,
     download_plugin,
     fetch_manifest,
+    github_raw_bases,
     resolve_manifest_source,
     version_risk,
 )
@@ -33,10 +34,12 @@ def _validate_url(url):
     if not isinstance(url, str):
         return None, 'URL is required.'
     url = url.strip()
-    if not url or not (url.startswith('http://') or url.startswith('https://')):
+    if not url:
         return None, 'URL must start with http:// or https://.'
     if len(url) > 500:
         return None, 'URL must be at most 500 characters.'
+    if not (url.startswith('http://') or url.startswith('https://')):
+        return None, 'URL must start with http:// or https://.'
     return url, None
 
 
@@ -132,7 +135,15 @@ def sync_plugin_repository(repo_id):
     if not repo:
         return jsonify({'error': {'message': 'Repository not found.'}}), 404
 
-    ok, error = _sync(repo)
+    # A repository whose very first sync failed still holds the github.com URL
+    # the operator typed -- resolution happens inside _sync(resolve=True) and
+    # never ran. Syncing that URL fetches GitHub's HTML 404 forever, so retry
+    # the resolution here instead of leaving the repo permanently unsyncable.
+    original_url = repo.url
+    needs_resolve = bool(github_raw_bases(repo.url))
+    ok, error = _sync(repo, resolve=needs_resolve)
+    if needs_resolve and ok and repo.url != original_url:
+        repo.display_url = original_url
     try:
         db.session.commit()
     except Exception as e:
@@ -214,6 +225,15 @@ def download_plugin_repository_plugins(repo_id):
             downloaded.append(filename)
         except PluginRepositoryError as e:
             errors.append({'filename': filename, 'error': str(e), 'code': e.code})
+
+    # This is the one route that writes remote executable Python into the pool,
+    # which ansible then ships to every host -- so record what landed, from
+    # where, and whether it replaced a file that was already there.
+    if downloaded:
+        current_app.logger.info(
+            f"Downloaded {len(downloaded)} plugin(s) from repository '{repo.name}' ({repo.url}) "
+            f"into the local pool (overwrite={overwrite}): {', '.join(downloaded)}"
+        )
 
     status = 200 if downloaded and not errors else (207 if downloaded else 502)
     return jsonify({'downloaded': downloaded, 'errors': errors}), status

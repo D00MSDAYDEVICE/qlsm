@@ -106,6 +106,43 @@ describe('configs written by hand', () => {
   });
 });
 
+// Quake Live applies the last `set` for a cvar, and a hand-edited config
+// accumulates duplicates. Reading or rewriting the first occurrence showed a
+// value the server wasn't running and made the save a silent no-op.
+describe('duplicate set lines', () => {
+  it('reads the last occurrence, which is the one Quake Live applies', () => {
+    expect(readCvarFromConfig('set qlx_x "1"\nset qlx_x "0"', 'qlx_x')).toBe('0');
+  });
+
+  it('rewrites the last occurrence so nothing later overrides the save', () => {
+    expect(upsertCvarInConfig('set qlx_x "1"\nset qlx_x "0"', 'qlx_x', '5'))
+      .toBe('set qlx_x "1"\nset qlx_x "5"');
+  });
+
+  it('ignores a commented-out line and rewrites the real one', () => {
+    expect(upsertCvarInConfig('// set qlx_c "1"\nset qlx_c 2', 'qlx_c', '9'))
+      .toBe('// set qlx_c "1"\nset qlx_c "9"');
+  });
+});
+
+// An unquoted value holding a `/` -- a URL or a path -- is ordinary for a
+// plugin cvar. The reader used to stop at the first slash and the writer left
+// the remainder of the old value dangling after the new quoted one.
+describe('unquoted values containing slashes', () => {
+  it('reads a whole unquoted URL', () => {
+    expect(readCvarFromConfig('set qlx_hook http://example.com/a', 'qlx_hook')).toBe('http://example.com/a');
+  });
+
+  it('replaces a whole unquoted URL without leaving the old tail behind', () => {
+    expect(upsertCvarInConfig('set qlx_hook http://example.com/a', 'qlx_hook', 'http://new/b'))
+      .toBe('set qlx_hook "http://new/b"');
+  });
+
+  it('reads an unquoted windows-style path', () => {
+    expect(readCvarFromConfig('set qlx_p C:/path/to', 'qlx_p')).toBe('C:/path/to');
+  });
+});
+
 describe('untrusted values', () => {
   it('drops a quote and newline so a value cannot start a new config line', () => {
     const cfg = upsertCvarInConfig('', 'qlx_greeting', 'hi"\nset rconpassword "pwned');

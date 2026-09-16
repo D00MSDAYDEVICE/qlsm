@@ -885,7 +885,9 @@ function AddInstanceForm({
     } finally {
       setIsLoadingPreset(false);
     }
-  }, [checkedPlugins, lanRateEnabled, lanRateSupported, resetConfigs, resetFactories, syncConfigState, selectedHostShape.runtime]);
+  // pluginsAdapter.tree: partitionCheckedPaths folds in a plugin's depends_on
+  // from the tree, so a stale [] drops those dependencies on a preset load.
+  }, [checkedPlugins, lanRateEnabled, lanRateSupported, pluginsAdapter.tree, resetConfigs, resetFactories, syncConfigState, selectedHostShape.runtime]);
 
   const handleLoadPreset = useCallback(async (presetId) => {
     setIsLoadingPreset(true);

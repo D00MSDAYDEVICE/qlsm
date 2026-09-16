@@ -266,8 +266,12 @@ function PluginRepositoriesPage() {
 
   const { showSuccess, showError } = useNotification();
 
-  const fetchRepos = useCallback(async () => {
-    setLoading(true);
+  // `silent` refreshes the list without flipping `loading`. The loading branch
+  // replaces every card with a spinner, which unmounts them and throws away
+  // card-local state -- including the overwrite confirm a partial download has
+  // just raised, and any expanded card.
+  const fetchRepos = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await getPluginRepositories();
@@ -275,7 +279,7 @@ function PluginRepositoriesPage() {
     } catch (err) {
       setError(err.error?.message || err.message || 'Failed to fetch plugin repositories.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -379,7 +383,7 @@ function PluginRepositoriesPage() {
               syncing={syncingId === repo.id}
               onSync={handleSync}
               onDelete={openDeleteModal}
-              onDownloaded={fetchRepos}
+              onDownloaded={() => fetchRepos({ silent: true })}
             />
           ))}
         </div>

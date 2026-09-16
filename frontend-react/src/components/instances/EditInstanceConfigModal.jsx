@@ -672,7 +672,10 @@ function EditInstanceConfigModal({
     } catch (err) {
       setPresetError(err.message || `Failed to load preset ${presetId}.`);
     }
-  }, [hostLanRateUsesHook, hostOsType, hostRuntime, originalLanRateEnabled, resetConfigs, resetFactories, showSuccess]);
+  // pluginTree: partitionCheckedPaths folds in a plugin's depends_on from the
+  // tree, so a stale [] silently degrades a preset load to the pre-manifest
+  // behaviour of dropping those dependencies.
+  }, [hostLanRateUsesHook, hostOsType, hostRuntime, originalLanRateEnabled, pluginTree, resetConfigs, resetFactories, showSuccess]);
 
   const handleLoadPreset = useCallback(async (presetId) => {
     setPresetError(null);

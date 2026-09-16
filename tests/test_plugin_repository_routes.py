@@ -181,6 +181,47 @@ def test_sync_reports_fetch_failure(client, app, monkeypatch):
     assert response.get_json()['error']['message'] == 'unreachable'
 
 
+def test_sync_resolves_a_github_url_whose_first_sync_failed(client, app, monkeypatch):
+    """Adding a github.com repo before its manifest is pushed used to strand it.
+
+    Resolution to the raw base only ran inside the create-time sync, so when
+    that sync failed the stored URL stayed the github.com HTML address and
+    every later sync re-fetched it forever -- delete-and-re-add was the only
+    way out. Sync now retries the resolution for an unresolved github URL.
+    """
+    make_user(app, 'ghuser', 'password123')
+    headers = auth_headers(app, 'ghuser')
+
+    # First sync fails: the operator added the repo before pushing the manifest.
+    _patch_fetch(monkeypatch, error='404')
+    response = client.post(
+        '/api/plugin-repositories/',
+        headers=headers,
+        json={'name': 'GH Repo', 'url': 'https://github.com/owner/repo'},
+    )
+    assert response.status_code == 201
+    repo_id = response.get_json()['data']['id']
+    with app.app_context():
+        stranded = db.session.get(PluginRepository, repo_id)
+        assert stranded.url == 'https://github.com/owner/repo'
+        assert stranded.display_url is None
+
+    # The manifest is now there; syncing must resolve rather than re-fetch HTML.
+    _patch_fetch(monkeypatch, plugins=[
+        {'filename': 'later.py', 'label': None, 'description': None,
+         'runtime': None, 'requires_qlsm_version': None},
+    ])
+    response = client.post(f'/api/plugin-repositories/{repo_id}/sync', headers=headers)
+    assert response.status_code == 200
+    assert [p['filename'] for p in response.get_json()['data']['plugins']] == ['later.py']
+
+    with app.app_context():
+        fixed = db.session.get(PluginRepository, repo_id)
+        assert fixed.url == 'https://raw.githubusercontent.com/owner/repo/main/'
+        # What the operator typed is kept for display once it was rewritten.
+        assert fixed.display_url == 'https://github.com/owner/repo'
+
+
 # --- DELETE /api/plugin-repositories/<id> ---
 
 def test_delete_repository(client, app, monkeypatch):

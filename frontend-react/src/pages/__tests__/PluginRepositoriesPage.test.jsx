@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import PluginRepositoriesPage from '../PluginRepositoriesPage';
 
@@ -84,6 +85,41 @@ describe('PluginRepositoriesPage downloads', () => {
     });
   });
 
+  it('keeps the overwrite confirm mounted when only some of the selection was already in the pool', async () => {
+    // A 207: one file landed, one was already there. Both branches of
+    // reportResult fire -- it raises the confirm AND reports a download, which
+    // refreshes the list. The confirm is card-local state, so a refresh that
+    // swaps every card for the loading spinner would unmount it unseen.
+    const twoPlugins = {
+      ...REPO,
+      plugins: [
+        ...REPO.plugins,
+        {
+          filename: 'extra.py', label: 'Extra', description: null,
+          runtime: 'minqlx', requires_qlsm_version: null, version_risk: null,
+        },
+      ],
+    };
+    // Latency so the refresh is genuinely in flight while the confirm renders.
+    mocks.getPluginRepositories.mockImplementation(
+      () => new Promise(resolve => { setTimeout(() => resolve([twoPlugins]), 60); }),
+    );
+    mocks.downloadPluginRepositoryPlugins.mockResolvedValueOnce({
+      downloaded: ['balance2.py'],
+      errors: [{ filename: 'extra.py', error: 'already exists', code: 'exists' }],
+    });
+
+    render(<PluginRepositoriesPage />);
+    fireEvent.click(await screen.findByText('Repo A'));
+    (await screen.findAllByRole('checkbox')).forEach(box => fireEvent.click(box));
+    fireEvent.click(screen.getByRole('button', { name: /download selected/i }));
+
+    expect(await screen.findByText(/overwrite existing plugins/i)).toBeInTheDocument();
+    // Still there once the refresh has settled, rather than flashing away.
+    await new Promise(resolve => { setTimeout(resolve, 120); });
+    expect(screen.getByText(/overwrite existing plugins/i)).toBeInTheDocument();
+  });
+
   it('shows the per-file reason instead of a generic message when every plugin fails for a non-exists error', async () => {
     mocks.downloadPluginRepositoryPlugins.mockRejectedValueOnce({
       downloaded: [], errors: [{ filename: 'balance2.py', error: 'boom', code: null }],
@@ -116,15 +152,22 @@ describe('PluginRepositoriesPage downloads', () => {
     const [balanceBox, noRuntimeBox] = await screen.findAllByRole('checkbox');
 
     fireEvent.click(balanceBox);
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    // Every runtime-less row carries a picker regardless of selection; what is
+    // gated is whether an unresolved runtime blocks the download.
+    expect(screen.queryByText(/pick a runtime for/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /download selected/i })).not.toBeDisabled();
 
     fireEvent.click(noRuntimeBox);
     const download = screen.getByRole('button', { name: /download selected/i });
     expect(download).toBeDisabled();
     expect(screen.getByText(/pick a runtime for no_runtime\.py/i)).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Runtime for no_runtime.py' }), { target: { value: 'minqlxtended' } });
-    expect(download).not.toBeDisabled();
+    // RuntimePicker is a Headless UI Listbox: a button trigger plus portalled
+    // options, not a <select>. It opens on userEvent, not fireEvent.click.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Runtime for no_runtime.py' }));
+    await user.click(await screen.findByRole('option', { name: 'minqlxtended' }));
+    await waitFor(() => expect(download).not.toBeDisabled());
     fireEvent.click(download);
 
     await waitFor(() => {
