@@ -57,6 +57,20 @@ describe('PluginDiffModal', () => {
     expect(screen.queryByText('On this server')).not.toBeInTheDocument();
   });
 
+  it('names a line-endings-only difference instead of showing an empty merge view', async () => {
+    mocks.getPluginRepositoryDiff.mockResolvedValue({
+      filename: 'autokick.py',
+      runtime: 'minqlx',
+      local: 'import minqlx\nmode = "kick"\n',
+      remote: 'import minqlx\r\nmode = "kick"\r\n',
+    });
+
+    renderModal();
+
+    expect(await screen.findByText(/differ only in line endings/i)).toBeInTheDocument();
+    expect(document.querySelector('.cm-mergeView')).not.toBeInTheDocument();
+  });
+
   it('shows the backend error message', async () => {
     mocks.getPluginRepositoryDiff.mockRejectedValue({ error: { message: 'returned HTTP 404' } });
 

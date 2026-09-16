@@ -52,6 +52,9 @@ Utility classes wrapping these tokens (`frontend-react/src/index.css:181-217`):
 Glow effects (dark-mode-flavored, defined directly in `tailwind.config.js`
 `boxShadow`): `shadow-glow-sm/md/lg`, `shadow-glow-danger`, `shadow-inner-glow`.
 
+Diff views tint removed lines with `--accent-danger` and added lines with
+`--accent-primary` (alpha 0.10–0.35), see `utils/codemirrorSetup.js`.
+
 ## Typography
 
 Defined in `tailwind.config.js:36-40`:
@@ -97,12 +100,14 @@ input styles — check `index.css` for the full variant before adding a new one.
 | `FileUploadButton` | `FileUploadButton.jsx` | Generic file-upload trigger |
 | `HostActionsMenu` / `InstanceActionsMenu` | `HostActionsMenu.jsx`, `InstanceActionsMenu.jsx` | Headless UI `Menu` action dropdowns, floating-ui positioned |
 | `RconConsoleModal` | `RconConsoleModal.jsx` | Modal wrapper around the RCON console UI |
-| `CodeMirrorEditor` | `CodeMirrorEditor.jsx` | Shared code editor used by file manager / config editors (near the 500-line file cap — avoid growing further) |
+| `CodeMirrorEditor` | `CodeMirrorEditor.jsx` | Shared code editor used by file manager / config editors; theme and highlight styles live in `utils/codemirrorSetup.js` (`themeExtensions`, `mergeThemeExtensions`) |
 | `FloatingListbox` | `components/common/FloatingListbox.jsx` | Headless UI `Listbox`-based custom select with floating-ui positioning; supports option badges (`OptionBadge`) and perf chips |
 | `InfoTooltip` | `components/common/InfoTooltip.jsx` | Hover tooltip; props: `size`, `placement` (top/bottom/left/right), `variant` (info/cyan/warning/danger), `testId` (data-testid for the hover target) |
 | `QlColorString` | `components/common/QlColorString.jsx` | Renders Quake Live `^`-color-coded strings as styled spans |
 | `SubfolderPluginNotice` | `components/fileManager/SubfolderPluginNotice.jsx` | Dismissible `.alert-warning` banner; props: `count` (0 renders nothing), `onDismiss`. Parent owns dismissal state |
 | `SidebarResizeHandle` | `components/fileManager/SidebarResizeHandle.jsx` | Drag handle between the file list and the editor pane; doubles as the 1px divider. Pointer-capture drag, double-click or `Home` resets, arrow keys nudge 16px. Width lives in the `useSidebarWidth` store (module-level + `localStorage`, clamped 200-560, default 320) so all three mounted FileManager tabs resize together |
+| `OverwritePluginsModal` | `pluginRepositories/OverwritePluginsModal.jsx` | Per-file overwrite prompt (checkbox + Diff per file); `files: [{filename, runtime}]`, `onConfirm(filenames)` |
+| `PluginDiffModal` | `pluginRepositories/PluginDiffModal.jsx` | 95vw×95vh read-only `@codemirror/merge` two-pane diff; z-[80] so it stacks above other modals |
 
 Feature-scoped directories (`components/hosts`, `instances`, `presetManager`,
 `fileManager`, `addInstance`, `users`, `rcon`) contain additional modals and

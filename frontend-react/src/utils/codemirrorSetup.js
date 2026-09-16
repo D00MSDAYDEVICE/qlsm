@@ -150,6 +150,14 @@ const mergeTheme = (c, dark) => EditorView.theme({
   '&.cm-merge-b .cm-changedText': { backgroundColor: c.addedText, textDecoration: 'none' },
   '&.cm-merge-a .cm-changedLineGutter': { backgroundColor: c.gutterRemoved },
   '&.cm-merge-b .cm-changedLineGutter': { backgroundColor: c.gutterAdded },
+  // The panes have no scroller of their own here (see the height rule above),
+  // so a search panel would sit at the top of a document-tall editor and
+  // scroll away. Pin it to the top of the visible diff instead.
+  '& .cm-panels-top': {
+    position: 'sticky',
+    top: '0',
+    zIndex: '30',
+  },
   '& .cm-collapsedLines': {
     backgroundColor: c.collapsed,
     color: 'var(--text-muted)',

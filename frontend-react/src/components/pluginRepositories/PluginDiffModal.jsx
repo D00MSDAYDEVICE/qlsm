@@ -21,12 +21,22 @@ function sideExtensions(isDark) {
     python(),
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
-    search(),
+    // `editable: false` makes the content div contenteditable="false", which
+    // is not focusable -- and CodeMirror listens for keydown on that div, so
+    // without a tabindex nothing here can ever be focused and searchKeymap
+    // never fires (Ctrl-F does nothing). Give each pane a tab stop instead.
+    EditorView.contentAttributes.of({ tabindex: '0' }),
+    // `top: true` plus the sticky panel styling in mergeThemeExtensions: each
+    // pane grows to its full content height inside one shared scroller, so a
+    // bottom panel would open thousands of pixels below the fold.
+    search({ top: true }),
     keymap.of(searchKeymap),
     ...themeExtensions(isDark),
     ...mergeThemeExtensions(isDark),
   ];
 }
+
+const normalizeEol = (text) => (text ?? '').replace(/\r\n?/g, '\n');
 
 // Side-by-side diff of one plugin: this server's pool copy (left) vs. the
 // repository's copy (right). Opened from OverwritePluginsModal; the z-index
@@ -53,7 +63,13 @@ function PluginDiffModal({ isOpen, onClose, repo, filename, runtime }) {
     return () => { cancelled = true; };
   }, [isOpen, repo.id, filename, runtime]);
 
-  const identical = result.status === 'ready' && result.local === result.remote;
+  // CodeMirror normalizes CRLF to LF when it builds a document, so two copies
+  // that differ only in line endings produce a merge view with no chunks at
+  // all -- every line folded into an "N unchanged lines" bar, which reads as a
+  // broken diff. Compare the way the panes will, and name that case instead.
+  const identical = result.status === 'ready'
+    && normalizeEol(result.local) === normalizeEol(result.remote);
+  const lineEndingsOnly = identical && result.local !== result.remote;
 
   useEffect(() => {
     if (result.status !== 'ready' || identical || !containerRef.current) return undefined;
@@ -105,7 +121,9 @@ function PluginDiffModal({ isOpen, onClose, repo, filename, runtime }) {
               )}
               {identical && (
                 <div className="flex h-full items-center justify-center text-theme-secondary">
-                  No differences — the repository copy matches this server&apos;s file.
+                  {lineEndingsOnly
+                    ? 'No visible differences — the two copies differ only in line endings.'
+                    : 'No differences — the repository copy matches this server\'s file.'}
                 </div>
               )}
               {result.status === 'ready' && !identical && (
