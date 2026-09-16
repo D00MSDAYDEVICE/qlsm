@@ -14,17 +14,11 @@ import {
   highlightActiveLine,
 } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-import { oneDark } from '@codemirror/theme-one-dark';
 import { linter, lintGutter } from '@codemirror/lint';
-import { syntaxHighlighting, HighlightStyle, bracketMatching, indentOnInput } from '@codemirror/language';
-import { tags as t } from '@lezer/highlight';
+import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { useTheme } from '../context/ThemeContext';
-// Imports for custom tags are still needed for highlight style, but specific linters aren't needed for the check anymore
 import { completionKeymap } from '@codemirror/autocomplete';
 import {
-  modTag,
-  adminTag,
-  banTag,
   qlaccessLanguage,
   qlAccessCompletion,
 } from '../codemirror-lang-qlaccess';
@@ -33,110 +27,10 @@ import { qlFactoriesLanguage, qlFactoriesCompletion } from '../codemirror-lang-q
 
 import { chatLogLanguage, chatDarkHighlighting, chatLightHighlighting } from '../utils/chatLogLanguage';
 import { minqlxLogLanguage, minqlxDarkHighlighting, minqlxLightHighlighting } from '../utils/minqlxLogLanguage';
-
-// Dark highlight style
-const darkHighlightStyle = HighlightStyle.define([
-  { tag: t.lineComment, class: 'custom-line-comment' },
-  { tag: modTag, color: '#42a5f5' },
-  { tag: adminTag, color: 'yellow' },
-  { tag: banTag, color: 'red' },
-  { tag: t.number, color: '#569CD6' },
-  { tag: t.operator, color: '#D4D4D4' },
-  { tag: t.invalid, color: '#ff6b6b', fontWeight: 'bold' },
-  { tag: t.keyword, color: '#ffa500' },
-  { tag: t.string, color: '#98c379' },
-  { tag: t.comment, color: '#6A9955' },
-  { tag: t.meta, color: '#c678dd' },
-  { tag: t.attributeName, color: '#61afef' },
-  { tag: t.typeName, color: '#e5c07b' },
-]);
-
-// Light highlight style — high contrast for light backgrounds
-const lightHighlightStyle = HighlightStyle.define([
-  { tag: t.lineComment, color: '#6e7781' },
-  { tag: modTag, color: '#0550ae' },
-  { tag: adminTag, color: '#953800' },
-  { tag: banTag, color: '#cf222e' },
-  { tag: t.number, color: '#0550ae' },
-  { tag: t.operator, color: '#24292f' },
-  { tag: t.invalid, color: '#cf222e', fontWeight: 'bold' },
-  { tag: t.keyword, color: '#8250df', fontWeight: 'bold' },
-  { tag: t.string, color: '#0a3069' },
-  { tag: t.comment, color: '#6e7781' },
-  { tag: t.meta, color: '#8250df' },
-  { tag: t.variableName, color: '#cf222e' },
-  { tag: t.attributeName, color: '#116329' },
-  { tag: t.typeName, color: '#953800' },
-]);
-
-// Dark editor chrome theme
-const darkEditorTheme = EditorView.theme({
-  // Completion tooltip: description first, then where the description came
-  // from, so a guess read off the cvar name never looks like a fact.
-  '& .cm-cvar-info': { maxWidth: '380px', lineHeight: '1.4' },
-  '& .cm-cvar-info-meta': { marginTop: '4px', fontSize: '11px', opacity: '0.85' },
-  '& .cm-cvar-info-bits': { marginTop: '4px', fontSize: '11px', opacity: '0.85', columnWidth: '150px' },
-  '& .cm-cvar-info-source': { marginTop: '6px', fontSize: '11px', fontStyle: 'italic', opacity: '0.7' },
-  '& .custom-line-comment': { color: '#6A9955 !important' },
-  '&': { height: '100%', backgroundColor: 'transparent !important' },
-  '& .cm-scroller': { backgroundColor: 'transparent !important', scrollbarColor: 'var(--surface-border-strong) var(--surface-elevated)' },
-  '& .cm-content': { backgroundColor: 'transparent !important' },
-  '& .cm-gutters': { backgroundColor: 'var(--surface-base) !important', borderRight: '1px solid var(--surface-border)', color: 'var(--text-muted) !important' },
-  '& .cm-gutter': { backgroundColor: 'var(--surface-base) !important' },
-  '& .cm-lineNumbers .cm-gutterElement': { color: 'var(--text-muted) !important', opacity: '1 !important' },
-  '& .cm-activeLineGutter': { backgroundColor: 'rgba(255, 255, 255, 0.05) !important' },
-  '& .cm-activeLine': { backgroundColor: 'rgba(255, 255, 255, 0.03) !important' },
-  '& .cm-selectionMatch': { backgroundColor: 'rgba(255, 200, 0, 0.35) !important', outline: '1px solid rgba(255, 200, 0, 0.6)' },
-  '& .cm-scroller::-webkit-scrollbar': { width: '14px', height: '14px' },
-  '& .cm-scroller::-webkit-scrollbar-track': { background: 'var(--surface-elevated)', borderRadius: '4px' },
-  '& .cm-scroller::-webkit-scrollbar-thumb': { background: 'var(--surface-border-strong)', borderRadius: '4px', border: '3px solid var(--surface-elevated)' },
-  '& .cm-scroller::-webkit-scrollbar-thumb:hover': { background: 'var(--text-muted)' },
-  '& .cm-panels': { backgroundColor: '#1e1e1e', zIndex: '100' },
-  '& .cm-panels-top': { borderBottom: '1px solid #444' },
-  '& .cm-search': { padding: '4px 8px' },
-  '& .cm-search input': { backgroundColor: '#333', color: '#fff', border: '1px solid #555', borderRadius: '3px', padding: '2px 6px' },
-  '& .cm-search button': { backgroundColor: '#444', color: '#fff', border: '1px solid #555', borderRadius: '3px', padding: '2px 8px', marginLeft: '4px' },
-  '& .cm-lint-marker-info': { content: '"" !important', color: '#60a5fa', fontSize: '14px', fontWeight: 'bold', fontFamily: 'serif', fontStyle: 'italic', width: '1em', textAlign: 'center' },
-  '& .cm-lint-marker-info::before': { content: '"i"' },
-});
-
-// Light editor chrome theme
-const lightEditorTheme = EditorView.theme({
-  // Completion tooltip: description first, then where the description came
-  // from, so a guess read off the cvar name never looks like a fact.
-  '& .cm-cvar-info': { maxWidth: '380px', lineHeight: '1.4' },
-  '& .cm-cvar-info-meta': { marginTop: '4px', fontSize: '11px', opacity: '0.85' },
-  '& .cm-cvar-info-bits': { marginTop: '4px', fontSize: '11px', opacity: '0.85', columnWidth: '150px' },
-  '& .cm-cvar-info-source': { marginTop: '6px', fontSize: '11px', fontStyle: 'italic', opacity: '0.7' },
-  '&': { height: '100%', backgroundColor: '#f6f8fa !important' },
-  '& .cm-scroller': { backgroundColor: '#f6f8fa !important', scrollbarColor: 'var(--surface-border-strong) var(--surface-elevated)' },
-  '& .cm-content': { backgroundColor: 'transparent !important', color: '#24292f' },
-  '& .cm-gutters': { backgroundColor: '#eef1f5 !important', borderRight: '1px solid #d0d7de !important', color: '#636c76 !important' },
-  '& .cm-gutter': { backgroundColor: '#eef1f5 !important' },
-  '& .cm-lineNumbers .cm-gutterElement': { color: '#636c76 !important', opacity: '1 !important' },
-  '& .cm-activeLineGutter': { backgroundColor: 'rgba(0, 0, 0, 0.06) !important', color: '#24292f !important' },
-  '& .cm-activeLine': { backgroundColor: 'rgba(0, 0, 0, 0.04) !important' },
-  '& .cm-selectionMatch': { backgroundColor: 'rgba(255, 180, 0, 0.3) !important', outline: '1px solid rgba(200, 140, 0, 0.7)' },
-  '& .cm-cursor': { borderLeftColor: '#24292f !important' },
-  '& .cm-selectionBackground': { backgroundColor: 'rgba(59, 130, 246, 0.2) !important' },
-  '& .cm-matchingBracket': { backgroundColor: 'rgba(5, 80, 174, 0.15) !important', color: '#0550ae !important' },
-  '& .cm-scroller::-webkit-scrollbar': { width: '14px', height: '14px' },
-  '& .cm-scroller::-webkit-scrollbar-track': { background: 'var(--surface-elevated)', borderRadius: '4px' },
-  '& .cm-scroller::-webkit-scrollbar-thumb': { background: 'var(--surface-border-strong)', borderRadius: '4px', border: '3px solid var(--surface-elevated)' },
-  '& .cm-scroller::-webkit-scrollbar-thumb:hover': { background: 'var(--text-muted)' },
-  '& .cm-panels': { backgroundColor: '#eef1f5', zIndex: '100', color: '#24292f' },
-  '& .cm-panels-top': { borderBottom: '1px solid #d0d7de' },
-  '& .cm-search': { padding: '4px 8px' },
-  '& .cm-search input': { backgroundColor: '#fff', color: '#24292f', border: '1px solid #d0d7de', borderRadius: '3px', padding: '2px 6px' },
-  '& .cm-search button': { backgroundColor: '#e8ecf1', color: '#24292f', border: '1px solid #d0d7de', borderRadius: '3px', padding: '2px 8px', marginLeft: '4px' },
-  '& .cm-lint-marker-info': { content: '"" !important', color: '#2563eb', fontSize: '14px', fontWeight: 'bold', fontFamily: 'serif', fontStyle: 'italic', width: '1em', textAlign: 'center' },
-  '& .cm-lint-marker-info::before': { content: '"i"' },
-});
+import { themeExtensions } from '../utils/codemirrorSetup';
 
 // Helper function to build extensions
 const getExtensions = (currentLanguage, currentLinterSource, onChangeCallback, isReadOnly = false, isDark = true) => {
-  const highlightStyle = isDark ? darkHighlightStyle : lightHighlightStyle;
-
   const baseExtensions = [
     lineNumbers(),
     lintGutter(),
@@ -146,7 +40,7 @@ const getExtensions = (currentLanguage, currentLinterSource, onChangeCallback, i
     drawSelection(),
     dropCursor(),
     indentOnInput(),
-    syntaxHighlighting(highlightStyle, { fallback: true }),
+    ...themeExtensions(isDark),
     bracketMatching(),
     rectangularSelection(),
     crosshairCursor(),
@@ -159,7 +53,6 @@ const getExtensions = (currentLanguage, currentLinterSource, onChangeCallback, i
       ...defaultKeymap,
       ...historyKeymap,
     ])),
-    ...(isDark ? [oneDark, darkEditorTheme] : [lightEditorTheme]),
     EditorView.updateListener.of((update) => {
       const isProgrammaticValueSync = update.transactions.some(transaction =>
         transaction.isUserEvent('setValue')
@@ -352,164 +245,3 @@ const CodeMirrorEditor = ({ value, onChange, language, isActiveTab, linterSource
 // Memoize the component
 const MemoizedCodeMirrorEditor = React.memo(CodeMirrorEditor);
 export default MemoizedCodeMirrorEditor;
-
-/* Original useEffect logic - kept for reference during refactor
-  useEffect(() => {
-    // Function to build extensions based on language and potential dynamic linter
-    const getExtensions = (currentLanguage, currentLinterSource) => {
-      // Define the custom highlight style using the imported tags
-      const customHighlightStyle = HighlightStyle.define([
-        { tag: t.lineComment, class: 'custom-line-comment' }, // Assign a custom class
-        { tag: modTag, color: '#42a5f5' }, // Brighter blue for better contrast
-        { tag: adminTag, color: 'yellow' },
-        { tag: banTag, color: 'red' },
-        { tag: t.number, color: '#569CD6' },
-        { tag: t.operator, color: '#D4D4D4' },
-        { tag: t.invalid, color: '#ff0000', fontStyle: 'italic' }
-      ]);
-
-      const baseExtensions = [
-        basicSetup,
-        keymap.of(defaultKeymap),
-        oneDark, // Base theme
-        syntaxHighlighting(customHighlightStyle), // Apply the custom highlight style
-        EditorView.theme({ // Theme to style the custom class
-          '& .custom-line-comment': { color: '#6A9955 !important' }
-        }),
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onChange(update.state.doc.toString());
-          }
-        }),
-      ];
-      if (currentLanguage) {
-        baseExtensions.push(currentLanguage);
-
-        // Determine the linter function to use
-        let activeLinter = null;
-        if (currentLinterSource) {
-          // If a dynamic linter source is provided, use it
-          activeLinter = currentLinterSource(); // Call the source function to get the actual linter
-        } else if (currentLanguage === qlaccessLanguage) {
-          // Fallback to static linters if no dynamic source
-          activeLinter = qlAccessLinter;
-        } else if (currentLanguage === qlworkshopLanguage) {
-          activeLinter = qlWorkshopLinter;
-        }
-
-        // Add linter and gutter if a linter function was determined
-        if (activeLinter) {
-          baseExtensions.push(linter(activeLinter));
-          baseExtensions.push(lintGutter());
-        }
-      }
-      return baseExtensions;
-    };
-
-    if (editorRef.current && !viewRef.current) {
-      // Pass linterSource to getExtensions during initial setup
-      const extensions = getExtensions(language, linterSource);
-      const startState = EditorState.create({
-        doc: value || '',
-        extensions: extensions,
-      });
-      const view = new EditorView({
-        state: startState,
-        parent: editorRef.current,
-      });
-      viewRef.current = view;
-    } else if (viewRef.current && language) {
-      // Check if the language or its associated linter needs to be reconfigured.
-      let needsReconfiguration = false;
-      const currentActiveExtensions = viewRef.current.state.facet(EditorState.extensions);
-
-      const currentLangExtension = currentActiveExtensions.find(ext => ext === language || (ext && ext.language === language.language));
-      if (!currentLangExtension) {
-        needsReconfiguration = true;
-      }
-
-      // --- Linter Reconfiguration Logic ---
-      // Determine the *new* linter function based on the *new* language and linterSource
-      let newLinterFunc = null;
-      if (linterSource) {
-        newLinterFunc = linterSource();
-      } else if (language === qlaccessLanguage) {
-        newLinterFunc = qlAccessLinter;
-      } else if (language === qlworkshopLanguage) {
-        newLinterFunc = qlWorkshopLinter;
-      }
-
-      // Find the *currently active* linter function in the state's extensions
-      let currentLinterFunc = null;
-      const lintPlugin = currentActiveExtensions.find(ext => ext && typeof ext.source === 'function' && ext.extension && ext.extension.name === 'linter');
-      if (lintPlugin) {
-        currentLinterFunc = lintPlugin.source;
-      }
-
-      // Reconfigure if the required linter function has changed (or needs adding/removing)
-      if (currentLinterFunc !== newLinterFunc) {
-         needsReconfiguration = true;
-      }
-      // --- End Linter Reconfiguration Logic ---
-
-
-      if (needsReconfiguration) {
-        // Pass linterSource to getExtensions when reconfiguring
-        const newExtensions = getExtensions(language, linterSource);
-        viewRef.current.dispatch({
-          effects: StateEffect.reconfigure.of(newExtensions)
-        });
-      }
-    }
-
-    return () => {
-      if (viewRef.current) {
-        viewRef.current.destroy();
-        viewRef.current = null;
-      }
-    };
-  // Pass linterSource as a dependency to re-run setup/reconfiguration if it changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editorRef, onChange, language, linterSource]);
-
-  // Handle external changes to the value prop
-  useEffect(() => {
-    if (viewRef.current && value !== viewRef.current.state.doc.toString()) {
-      viewRef.current.dispatch({
-        changes: { from: 0, to: viewRef.current.state.doc.length, insert: value || '' },
-      });
-    }
-  }, [value]);
-
-  // Effect to refresh editor when tab becomes active
-  useEffect(() => {
-    if (isActiveTab && viewRef.current) {
-      const timer = setTimeout(() => {
-        if (viewRef.current) {
-          viewRef.current.requestMeasure();
-        }
-      }, 0);
-      return () => clearTimeout(timer);
-    }
-  }, [isActiveTab]);
-
-  return (
-    <div
-      ref={editorRef}
-      className="codemirror-editor-container [&_.cm-editor]:h-full"
-      style={{
-        height: '220px',      // Initial height
-        minHeight: '100px',   // Minimum sensible height
-        maxHeight: '75vh',    // Maximum height (75% of viewport height)
-        resize: 'vertical',
-        overflow: 'auto',
-        // The border and rounded corners are typically handled by the parent container,
-        // but if this component is used standalone, these ensure it looks consistent.
-        // We'll rely on parent for now, assuming it has border/rounded.
-      }}
-    />
-  );
-};
-
-export default CodeMirrorEditor;
-*/
