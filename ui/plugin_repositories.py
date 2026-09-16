@@ -261,12 +261,17 @@ def version_risk(requires_qlsm_version, current_qlsm_version=None):
     }
 
 
-def download_plugin(base_url, filename, runtime, overwrite=False):
-    """Fetch <base_url>/<filename> (and its `.ql-plugin.json` sidecar, if the
-    repo ships one) over HTTP and write them into the local pool for
-    `runtime`. Raises PluginRepositoryError if the plugin source itself can't
-    be fetched; a missing or malformed sidecar is silently skipped, same as
-    plugin_manifest.py already tolerates for any other plugin.
+def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifest=None):
+    """Fetch <base_url>/<filename> over HTTP and write it into the local pool
+    for `runtime`, together with its `.ql-plugin.json` sidecar: the repo's own
+    separate sidecar file when it ships a parseable one, else
+    `inline_manifest` (the entry's metadata from qlsm-plugins.json, see
+    build_inline_manifest), else none -- and any stale pool sidecar is
+    removed. The separate-sidecar fetch is always attempted, even when
+    `inline_manifest` is given, because the separate file wins by design;
+    for a single-file repo that is one expected 404 per plugin. Raises
+    PluginRepositoryError if the plugin source itself can't be fetched; a
+    missing, malformed or non-object separate sidecar is not an error.
 
     Refuses to replace a file already in the pool unless `overwrite` is set:
     a repo plugin sharing a name with a bundled one (e.g. balance.py) would
@@ -293,8 +298,17 @@ def download_plugin(base_url, filename, runtime, overwrite=False):
     manifest_path = os.path.join(pool_dir, manifest_filename)
     try:
         manifest_content = _fetch(base_url.rstrip('/') + '/' + manifest_filename, MANIFEST_MAX_SIZE)
-        json.loads(manifest_content)  # validate before writing -- same trust boundary as the .py source
+        # Validate before writing -- same trust boundary as the .py source.
+        # Must be a JSON object: load_manifest_file() rejects anything else,
+        # so a repo shipping `[]` here should fall through to inline instead.
+        if not isinstance(json.loads(manifest_content), dict):
+            raise ValueError('sidecar is not a JSON object')
     except (PluginRepositoryError, ValueError):
+        # Compact JSON on purpose: build_inline_manifest() measured the
+        # compact form against PLUGIN_MANIFEST_MAX_SIZE, and the pool reader
+        # checks the on-disk size against the same cap.
+        manifest_content = json.dumps(inline_manifest).encode('utf-8') if inline_manifest else None
+    if manifest_content is None:
         # No usable sidecar this time around -- a stale one from a previous
         # download of this same filename must not linger and describe the
         # new .py incorrectly.

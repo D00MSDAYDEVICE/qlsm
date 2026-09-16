@@ -1,8 +1,10 @@
 import json
+import os
 
 import pytest
 
 import ui.plugin_repositories as plugin_repositories
+from ui.plugin_manifest import PLUGIN_MANIFEST_MAX_SIZE
 from ui.plugin_repositories import (
     PluginRepositoryError,
     build_inline_manifest,
@@ -288,6 +290,86 @@ def test_download_plugin_removes_a_stale_sidecar_when_the_new_copy_has_none(tmp_
 
     assert (pool / 'demo_plugin.py').read_bytes() == b'print("new copy")'
     assert not (pool / 'demo_plugin.ql-plugin.json').exists()
+
+
+def test_download_plugin_writes_inline_manifest_when_repo_has_no_sidecar(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(404, b'')
+        return FakeResponse(200, b'print("hello")')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    inline = {'label': 'Demo', 'cvars': [{'cvar': 'qlx_demo', 'type': 'bool', 'default': False}]}
+    download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx', inline_manifest=inline)
+
+    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    assert json.loads(manifest_path.read_text()) == inline
+
+
+def test_download_plugin_separate_sidecar_wins_over_inline(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(200, b'{"label": "From sidecar"}')
+        return FakeResponse(200, b'print("hello")')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx',
+                    inline_manifest={'label': 'From inline'})
+
+    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    assert manifest_path.read_text() == '{"label": "From sidecar"}'
+
+
+@pytest.mark.parametrize('bad_sidecar', [b'not json', b'[]', b'"oops"'])
+def test_download_plugin_unusable_sidecar_falls_back_to_inline(tmp_path, monkeypatch, bad_sidecar):
+    # Invalid JSON, or valid JSON that is not an object: the pool reader
+    # (load_manifest_file) would reject either, so inline must win instead.
+    monkeypatch.chdir(tmp_path)
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(200, bad_sidecar)
+        return FakeResponse(200, b'print("hello")')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx',
+                    inline_manifest={'label': 'From inline'})
+
+    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    assert json.loads(manifest_path.read_text()) == {'label': 'From inline'}
+
+
+def test_download_plugin_inline_manifest_at_the_cap_is_written_within_the_cap(tmp_path, monkeypatch):
+    # build_inline_manifest() measures compact JSON; the file written must be
+    # the same bytes, otherwise load_manifest_file() (which checks on-disk
+    # size against PLUGIN_MANIFEST_MAX_SIZE) silently ignores the sidecar.
+    # Many small cvars make the indented form far larger than the compact one.
+    monkeypatch.chdir(tmp_path)
+    inline = {
+        'label': 'Big',
+        'cvars': [{'cvar': f'qlx_v{i}', 'type': 'bool', 'default': False} for i in range(200)],
+        'description': '',
+    }
+    padding = PLUGIN_MANIFEST_MAX_SIZE - len(json.dumps(inline).encode('utf-8'))
+    inline['description'] = 'x' * padding
+    assert len(json.dumps(inline).encode('utf-8')) == PLUGIN_MANIFEST_MAX_SIZE  # precondition
+    assert build_inline_manifest({'filename': 'demo_plugin.py', **inline}) == inline
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(404, b'')
+        return FakeResponse(200, b'print("hello")')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx', inline_manifest=inline)
+
+    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    assert os.path.getsize(manifest_path) <= PLUGIN_MANIFEST_MAX_SIZE
+    assert json.loads(manifest_path.read_text()) == inline
 
 
 # --- github.com URL resolution ---
