@@ -1,17 +1,22 @@
 import datetime
 import json
+import os
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required
 
 from ui import db
 from ui.models import PluginRepository
+from ui.plugin_pool import pool_dir as shared_pool_dir
 from ui.plugin_repositories import (
+    PLUGIN_FILE_MAX_SIZE,
     PluginRepositoryError,
     build_inline_manifest,
     download_plugin,
     fetch_manifest,
+    fetch_plugin_source,
     github_raw_bases,
+    is_safe_plugin_filename,
     resolve_manifest_source,
     version_risk,
 )
@@ -48,6 +53,19 @@ def _repo_urls(repo):
     """Both addresses a repository answers to: what qlsm fetches, and what
     the operator typed if that was rewritten."""
     return {u.rstrip('/') for u in (repo.url, repo.display_url) if u}
+
+
+def _resolve_runtime(entry, picked):
+    """The pool a repo file belongs to: the runtime its manifest entry
+    declares, else the operator's pick, else None. Download and diff both go
+    through here, so they can never compare against a different pool than
+    the one a download writes to."""
+    declared = (entry or {}).get('runtime')
+    if is_valid_runtime(declared):
+        return normalize_runtime(declared)
+    if is_valid_runtime(picked):
+        return normalize_runtime(picked)
+    return None
 
 
 def _sync(repo, resolve=False):
@@ -152,8 +170,10 @@ def sync_plugin_repository(repo_id):
         current_app.logger.error(f"Error saving sync result for repository {repo_id}: {e}")
         return jsonify({'error': {'message': 'Failed to save sync result.'}}), 500
 
+    # Never 502/504 here or below: Cloudflare replaces those bodies with its
+    # own error page, so the operator would never see why a fetch failed.
     if not ok:
-        return jsonify({'error': {'message': error}, 'data': repo.to_dict()}), 502
+        return jsonify({'error': {'message': error}, 'data': repo.to_dict()}), 422
     return jsonify({'data': repo.to_dict()}), 200
 
 
@@ -230,9 +250,8 @@ def download_plugin_repository_plugins(repo_id):
             errors.append({'filename': filename, 'error': 'Not a string.'})
             continue
         entry = known_by_filename.get(filename)
-        declared_runtime = (entry or {}).get('runtime')
-        runtime = declared_runtime if is_valid_runtime(declared_runtime) else picked_runtimes.get(filename)
-        if not is_valid_runtime(runtime):
+        runtime = _resolve_runtime(entry, picked_runtimes.get(filename))
+        if runtime is None:
             errors.append({
                 'filename': filename,
                 'error': 'No runtime declared for this plugin. Pick one for it before downloading.',
@@ -240,7 +259,7 @@ def download_plugin_repository_plugins(repo_id):
             continue
         try:
             download_plugin(
-                repo.url, filename, normalize_runtime(runtime), overwrite=overwrite,
+                repo.url, filename, runtime, overwrite=overwrite,
                 inline_manifest=build_inline_manifest(fresh_by_filename.get(filename) or entry),
             )
             downloaded.append(filename)
@@ -256,5 +275,64 @@ def download_plugin_repository_plugins(repo_id):
             f"into the local pool (overwrite={overwrite}): {', '.join(downloaded)}"
         )
 
-    status = 200 if downloaded and not errors else (207 if downloaded else 502)
+    if downloaded:
+        status = 207 if errors else 200
+    elif all(e.get('code') == 'exists' for e in errors):
+        status = 409  # the UI turns this body into an overwrite prompt
+    else:
+        status = 422
     return jsonify({'downloaded': downloaded, 'errors': errors}), status
+
+
+@plugin_repository_api_bp.route('/<int:repo_id>/diff', methods=['GET'])
+@jwt_required()
+def diff_plugin_repository_plugin(repo_id):
+    """Local pool copy vs. repository copy of one plugin, for the overwrite
+    prompt's Diff window. Read-only. Never 502: Cloudflare replaces those
+    bodies with its own page, hiding the reason."""
+    repo = db.session.get(PluginRepository, repo_id)
+    if not repo:
+        return jsonify({'error': {'message': 'Repository not found.'}}), 404
+
+    filename = (request.args.get('filename') or '').strip()
+    if not is_safe_plugin_filename(filename):
+        return jsonify({'error': {'message': f"Refusing to diff unsafe filename: {filename!r}"}}), 400
+
+    # Same check and message as the download route, so a malformed pick is
+    # reported as unknown rather than as "no runtime declared".
+    picked = request.args.get('runtime') or None
+    if picked is not None and not is_valid_runtime(picked):
+        return jsonify({'error': {'message': f"Unknown runtime: {picked!r}"}}), 400
+
+    entry = next((p for p in repo.to_dict()['plugins'] if p['filename'] == filename), None)
+    runtime = _resolve_runtime(entry, picked)
+    if runtime is None:
+        return jsonify({'error': {'message': 'No runtime declared for this plugin. Pick one for it first.'}}), 400
+
+    local_path = os.path.join(shared_pool_dir(runtime), filename)
+    if not os.path.isfile(local_path):
+        return jsonify({'error': {'message': f"{filename} is not in the local pool."}}), 404
+    # The file can vanish between isfile() and the read (an overwrite download
+    # in another tab, a pool sync) or be unreadable; both are "not in the pool"
+    # to the caller, never a 500.
+    try:
+        if os.path.getsize(local_path) > PLUGIN_FILE_MAX_SIZE:
+            return jsonify({'error': {'message': (
+                f"{filename} in the local pool is larger than the {PLUGIN_FILE_MAX_SIZE} byte limit"
+            )}}), 422
+        with open(local_path, 'rb') as f:
+            local = f.read()
+    except OSError:
+        return jsonify({'error': {'message': f"{filename} is not in the local pool."}}), 404
+
+    try:
+        remote = fetch_plugin_source(repo.url, filename)
+    except PluginRepositoryError as e:
+        return jsonify({'error': {'message': str(e)}}), 422
+
+    return jsonify({'data': {
+        'filename': filename,
+        'runtime': runtime,
+        'local': local.decode('utf-8', errors='replace'),
+        'remote': remote.decode('utf-8', errors='replace'),
+    }}), 200

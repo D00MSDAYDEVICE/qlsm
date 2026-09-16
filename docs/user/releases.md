@@ -6,6 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.37.0` | 2026-09-16 | [#215](https://github.com/dngrtech/qlsm/pull/215) | Pick per file what to overwrite when a plugin download finds an existing file, and compare the server's copy with the repository's side by side first. Also fixes the "502 Bad gateway" error shown behind Cloudflare instead of the overwrite prompt. |
 | `v1.36.0` | 2026-09-16 | [#214](https://github.com/dngrtech/qlsm/pull/214) | Describe every plugin's cvars and commands inline in a repository's single `qlsm-plugins.json` instead of one manifest file per plugin. |
 | `v1.35.0` | 2026-09-15 | [#207](https://github.com/dngrtech/qlsm/pull/207) | Add plugin manifests with editable plugin cvars in the **Plugins** tab, external plugin repositories, and cvar/command autocomplete in the config editor. |
 | `v1.34.2` | 2026-09-14 | [#213](https://github.com/dngrtech/qlsm/pull/213) | Count only admins shown in a level card in the **Server Admins** badge. |

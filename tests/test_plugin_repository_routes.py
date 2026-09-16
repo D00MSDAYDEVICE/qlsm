@@ -177,7 +177,7 @@ def test_sync_reports_fetch_failure(client, app, monkeypatch):
 
     _patch_fetch(monkeypatch, error='unreachable')
     response = client.post(f'/api/plugin-repositories/{repo_id}/sync', headers=headers)
-    assert response.status_code == 502
+    assert response.status_code == 422
     assert response.get_json()['error']['message'] == 'unreachable'
 
 
@@ -279,7 +279,7 @@ def test_download_requires_a_runtime_when_manifest_has_none(client, app, monkeyp
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
         json={'filenames': ['no_runtime.py']},
     )
-    assert response.status_code == 502
+    assert response.status_code == 422
     assert response.get_json()['downloaded'] == []
     assert response.get_json()['errors'][0]['filename'] == 'no_runtime.py'
 
@@ -378,7 +378,7 @@ def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, mo
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
         json={'filenames': ['balance2.py']},
     )
-    assert blocked.status_code == 502
+    assert blocked.status_code == 409
     assert blocked.get_json()['errors'][0]['code'] == 'exists'
 
     retried = client.post(
@@ -387,6 +387,36 @@ def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, mo
     )
     assert retried.status_code == 200
     assert retried.get_json()['downloaded'] == ['balance2.py']
+
+
+def test_download_mixed_exists_and_other_failure_returns_422(client, app, monkeypatch):
+    """409 is only for "everything already exists": any other failure in the
+    batch has no overwrite fix, so the whole response is a plain 422."""
+    _patch_fetch(monkeypatch, error='offline')
+    make_user(app, 'dlmixed', 'password123')
+    headers = auth_headers(app, 'dlmixed')
+    with app.app_context():
+        repo = _seeded_repo('Repo M', 'https://example.com/m', plugins=[
+            {'filename': 'dup.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None},
+            {'filename': 'bad.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None},
+        ])
+        repo_id = repo.id
+
+    def fake_download(base_url, filename, runtime, overwrite=False, inline_manifest=None):
+        if filename == 'dup.py':
+            raise PluginRepositoryError('dup.py already exists in the local pool.', code='exists')
+        raise PluginRepositoryError('download failed')
+
+    monkeypatch.setattr(plugin_repository_routes, 'download_plugin', fake_download)
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['dup.py', 'bad.py']},
+    )
+    assert response.status_code == 422
+    codes = {e['filename']: e.get('code') for e in response.get_json()['errors']}
+    assert codes == {'dup.py': 'exists', 'bad.py': None}
 
 
 def test_download_uses_freshly_fetched_entry_for_inline_manifest(client, app, monkeypatch):
@@ -539,3 +569,252 @@ def test_create_repository_rejects_a_url_already_added_in_its_other_form(client,
 
     assert raw.status_code == 409
     assert typed_again.status_code == 409
+
+
+# --- _resolve_runtime ---
+
+@pytest.mark.parametrize('declared, picked, expected', [
+    ('minqlx', 'minqlxtended', 'minqlx'),   # declared valid wins over the pick
+    ('retired', 'minqlxtended', 'minqlxtended'),  # declared invalid falls through
+    ('retired', 'nope', None),               # both invalid
+    (None, None, None),                      # nothing to resolve
+    ('MinQLX', None, 'minqlx'),              # result is normalized
+])
+def test_resolve_runtime(declared, picked, expected):
+    entry = {'filename': 'x.py', 'runtime': declared} if declared is not None else None
+    assert plugin_repository_routes._resolve_runtime(entry, picked) == expected
+
+
+# --- GET /api/plugin-repositories/<id>/diff ---
+
+def _patch_diff(monkeypatch, tmp_path, local=None, remote=b'print("repo")', error=None):
+    """Point the pool at tmp_path/<runtime> and stub the repo fetch.
+    `local` bytes are written as tmp_path/<runtime>/balance2.py."""
+    def fake_pool_dir(runtime):
+        return str(tmp_path / runtime)
+
+    fetched = []
+
+    def fake_fetch(base_url, filename):
+        fetched.append((base_url, filename))
+        if error:
+            raise PluginRepositoryError(error)
+        return remote
+
+    monkeypatch.setattr(plugin_repository_routes, 'shared_pool_dir', fake_pool_dir)
+    monkeypatch.setattr(plugin_repository_routes, 'fetch_plugin_source', fake_fetch)
+    if local is not None:
+        (tmp_path / 'minqlx').mkdir(parents=True, exist_ok=True)
+        (tmp_path / 'minqlx' / 'balance2.py').write_bytes(local)
+    return fetched
+
+
+def test_diff_returns_local_and_remote_text(client, app, monkeypatch, tmp_path):
+    fetched = _patch_diff(monkeypatch, tmp_path, local=b'print("local")')
+    make_user(app, 'diff1', 'password123')
+    headers = auth_headers(app, 'diff1')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff A', 'https://example.com/diff-a/').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()['data'] == {
+        'filename': 'balance2.py', 'runtime': 'minqlx',
+        'local': 'print("local")', 'remote': 'print("repo")',
+    }
+    assert fetched == [('https://example.com/diff-a/', 'balance2.py')]
+
+
+def test_diff_declared_runtime_wins_over_query_runtime(client, app, monkeypatch, tmp_path):
+    _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    make_user(app, 'diff2', 'password123')
+    headers = auth_headers(app, 'diff2')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff B', 'https://example.com/diff-b').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py&runtime=minqlxtended',
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()['data']['runtime'] == 'minqlx'
+
+
+def test_diff_uses_query_runtime_when_manifest_declares_none(client, app, monkeypatch, tmp_path):
+    _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    make_user(app, 'diff3', 'password123')
+    headers = auth_headers(app, 'diff3')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff C', 'https://example.com/diff-c', plugins=[
+            {'filename': 'balance2.py', 'label': None, 'description': None,
+             'runtime': None, 'requires_qlsm_version': None},
+        ]).id
+
+    missing = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+    picked = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py&runtime=minqlx', headers=headers,
+    )
+
+    assert missing.status_code == 400
+    assert 'No runtime declared' in missing.get_json()['error']['message']
+    assert picked.status_code == 200
+
+
+def test_diff_works_for_a_never_synced_repository_with_a_picked_runtime(client, app, monkeypatch, tmp_path):
+    # Empty manifest: the filename is not in the synced list, but a valid pick
+    # still resolves the pool, the same as download.
+    _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    make_user(app, 'diff3b', 'password123')
+    headers = auth_headers(app, 'diff3b')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff C2', 'https://example.com/diff-c2', plugins=[]).id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py&runtime=minqlx', headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()['data']['runtime'] == 'minqlx'
+
+
+def test_diff_rejects_an_unknown_query_runtime(client, app, monkeypatch, tmp_path):
+    fetched = _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    make_user(app, 'diff3c', 'password123')
+    headers = auth_headers(app, 'diff3c')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff C3', 'https://example.com/diff-c3').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py&runtime=foo', headers=headers,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()['error']['message'] == "Unknown runtime: 'foo'"
+    assert fetched == []
+
+
+@pytest.mark.parametrize('case, filename', [
+    ('parent', '../balance2.py'), ('nested', 'sub/balance2.py'), ('ext', 'balance2.txt'), ('empty', ''),
+])
+def test_diff_rejects_unsafe_filenames(client, app, monkeypatch, tmp_path, case, filename):
+    fetched = _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    # One user per case, in case the app fixture's DB outlives a single parametrized run.
+    make_user(app, f'diff4{case}', 'password123')
+    headers = auth_headers(app, f'diff4{case}')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff D', 'https://example.com/diff-d').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff', headers=headers,
+        query_string={'filename': filename},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()['error']['message'] == f"Refusing to diff unsafe filename: '{filename}'"
+    assert fetched == []
+
+
+def test_diff_missing_local_file_is_404(client, app, monkeypatch, tmp_path):
+    fetched = _patch_diff(monkeypatch, tmp_path, local=None)
+    make_user(app, 'diff5', 'password123')
+    headers = auth_headers(app, 'diff5')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff E', 'https://example.com/diff-e').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert 'not in the local pool' in response.get_json()['error']['message']
+    assert fetched == []
+
+
+def test_diff_local_file_vanishing_after_isfile_is_404_not_500(client, app, monkeypatch, tmp_path):
+    # TOCTOU: an overwrite download or a pool sync can remove the file between
+    # the isfile check and the read.
+    fetched = _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    monkeypatch.setattr(
+        plugin_repository_routes.os.path, 'getsize',
+        lambda path: (_ for _ in ()).throw(FileNotFoundError(path)),
+    )
+    make_user(app, 'diff5b', 'password123')
+    headers = auth_headers(app, 'diff5b')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff E2', 'https://example.com/diff-e2').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert 'not in the local pool' in response.get_json()['error']['message']
+    assert fetched == []
+
+
+def test_diff_unknown_repository_is_404(client, app, monkeypatch, tmp_path):
+    _patch_diff(monkeypatch, tmp_path, local=b'x = 1')
+    make_user(app, 'diff6', 'password123')
+    headers = auth_headers(app, 'diff6')
+
+    response = client.get('/api/plugin-repositories/9999/diff?filename=balance2.py', headers=headers)
+
+    assert response.status_code == 404
+    assert response.get_json()['error']['message'] == 'Repository not found.'
+
+
+def test_diff_fetch_failure_is_422_not_502(client, app, monkeypatch, tmp_path):
+    _patch_diff(monkeypatch, tmp_path, local=b'x = 1', error='https://example.com/x returned HTTP 404')
+    make_user(app, 'diff7', 'password123')
+    headers = auth_headers(app, 'diff7')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff F', 'https://example.com/diff-f').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.get_json()['error']['message'] == 'https://example.com/x returned HTTP 404'
+
+
+def test_diff_oversized_local_file_is_422(client, app, monkeypatch, tmp_path):
+    monkeypatch.setattr(plugin_repository_routes, 'PLUGIN_FILE_MAX_SIZE', 4)
+    _patch_diff(monkeypatch, tmp_path, local=b'123456')
+    make_user(app, 'diff8', 'password123')
+    headers = auth_headers(app, 'diff8')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff G', 'https://example.com/diff-g').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert 'larger than the 4 byte limit' in response.get_json()['error']['message']
+
+
+def test_diff_replaces_invalid_utf8(client, app, monkeypatch, tmp_path):
+    _patch_diff(monkeypatch, tmp_path, local=b'caf\xe9', remote=b'ok')
+    make_user(app, 'diff9', 'password123')
+    headers = auth_headers(app, 'diff9')
+    with app.app_context():
+        repo_id = _seeded_repo('Diff H', 'https://example.com/diff-h').id
+
+    response = client.get(
+        f'/api/plugin-repositories/{repo_id}/diff?filename=balance2.py', headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()['data']['local'] == 'caf�'
+
+
+def test_diff_requires_auth(client, app):
+    response = client.get('/api/plugin-repositories/1/diff?filename=balance2.py')
+    assert response.status_code == 401

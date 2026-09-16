@@ -4390,3 +4390,21 @@ body {
   .global-rcon-target-toggle { display: inline; }
   .global-rcon-targets-collapsed { max-height: none; overflow: hidden; }
 }
+
+/* Plugin repository diff (PluginDiffModal). The panes deliberately have no
+   scroller of their own -- the modal body scrolls both at once -- but
+   @codemirror/merge still makes .cm-mergeView and .cm-mergeViewEditor scroll
+   containers, and a sticky search panel would then stick to a box that never
+   moves. Hand the scrolling back to the modal body so the panel pins to the
+   top of the visible diff. Horizontal clipping stays with .cm-scroller. */
+.plugin-diff-view .cm-mergeView,
+.plugin-diff-view .cm-mergeViewEditor {
+  overflow: visible;
+}
+/* overflow:hidden was also what forced these flex panes to min-width:0; without
+   it each pane would grow to its longest line instead of taking half the
+   window. Keep the even split -- .cm-scroller still clips and scrolls the
+   long lines inside it. */
+.plugin-diff-view .cm-mergeViewEditor {
+  min-width: 0;
+}

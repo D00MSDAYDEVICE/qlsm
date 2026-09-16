@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   syncPluginRepository: vi.fn(),
   deletePluginRepository: vi.fn(),
   downloadPluginRepositoryPlugins: vi.fn(),
+  getPluginRepositoryDiff: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
 }));
@@ -20,6 +21,7 @@ vi.mock('../../services/api', () => ({
   syncPluginRepository: mocks.syncPluginRepository,
   deletePluginRepository: mocks.deletePluginRepository,
   downloadPluginRepositoryPlugins: mocks.downloadPluginRepositoryPlugins,
+  getPluginRepositoryDiff: mocks.getPluginRepositoryDiff,
 }));
 
 vi.mock('../../components/NotificationProvider', () => ({
@@ -51,6 +53,9 @@ describe('PluginRepositoriesPage downloads', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPluginRepositories.mockResolvedValue([REPO]);
+    // Default resolution so a future Diff-click test fails on its own
+    // assertion rather than on an unhandled rejection from the modal's fetch.
+    mocks.getPluginRepositoryDiff.mockResolvedValue({ local: '', remote: '' });
   });
 
   it('shows a success toast on a clean download', async () => {
@@ -75,7 +80,7 @@ describe('PluginRepositoriesPage downloads', () => {
     fireEvent.click(screen.getByRole('button', { name: /download selected/i }));
 
     expect(await screen.findByText(/overwrite existing plugins/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^overwrite$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /overwrite selected/i }));
 
     await waitFor(() => {
       expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenLastCalledWith(1, ['balance2.py'], {}, true);
@@ -118,6 +123,70 @@ describe('PluginRepositoriesPage downloads', () => {
     // Still there once the refresh has settled, rather than flashing away.
     await new Promise(resolve => { setTimeout(resolve, 120); });
     expect(screen.getByText(/overwrite existing plugins/i)).toBeInTheDocument();
+  });
+
+  it('overwrites only the files left ticked in the prompt', async () => {
+    const twoPlugins = {
+      ...REPO,
+      plugins: [
+        ...REPO.plugins,
+        {
+          filename: 'extra.py', label: 'Extra', description: null,
+          runtime: 'minqlx', requires_qlsm_version: null, version_risk: null,
+        },
+      ],
+    };
+    mocks.getPluginRepositories.mockResolvedValue([twoPlugins]);
+    mocks.downloadPluginRepositoryPlugins
+      .mockRejectedValueOnce({
+        downloaded: [],
+        errors: [
+          { filename: 'balance2.py', error: 'already exists', code: 'exists' },
+          { filename: 'extra.py', error: 'already exists', code: 'exists' },
+        ],
+      })
+      .mockResolvedValueOnce({ downloaded: ['extra.py'], errors: [] });
+
+    render(<PluginRepositoriesPage />);
+    fireEvent.click(await screen.findByText('Repo A'));
+    (await screen.findAllByRole('checkbox')).forEach(box => fireEvent.click(box));
+    fireEvent.click(screen.getByRole('button', { name: /download selected/i }));
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'balance2.py' }));
+    fireEvent.click(screen.getByRole('button', { name: /overwrite selected/i }));
+
+    await waitFor(() => {
+      expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenLastCalledWith(1, ['extra.py'], {}, true);
+    });
+    // The downloaded file is cleared from the list selection; the one left
+    // unticked in the prompt stays selected, the same as after Cancel.
+    await waitFor(() => {
+      expect(screen.queryByText(/overwrite existing plugins/i)).not.toBeInTheDocument();
+    });
+    // Rows are matched by their rendered label text ('Balance'/'Extra'), not
+    // filename -- the card renders `plugin.label || plugin.filename`, and
+    // this fixture sets a label.
+    const boxes = screen.getAllByRole('checkbox');
+    expect(boxes.find(box => box.closest('tr')?.textContent.includes('Balance'))).toBeChecked();
+    expect(boxes.find(box => box.closest('tr')?.textContent.includes('Extra'))).not.toBeChecked();
+  });
+
+  it('cancel in the overwrite prompt keeps the selection and does not download again', async () => {
+    mocks.downloadPluginRepositoryPlugins.mockRejectedValueOnce({
+      downloaded: [], errors: [{ filename: 'balance2.py', error: 'already exists', code: 'exists' }],
+    });
+
+    await openAndCheckFirstPlugin();
+    fireEvent.click(screen.getByRole('button', { name: /download selected/i }));
+
+    expect(await screen.findByText(/overwrite existing plugins/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText(/overwrite existing plugins/i)).not.toBeInTheDocument();
+    });
+    expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('checkbox')).toBeChecked();
   });
 
   it('shows the per-file reason instead of a generic message when every plugin fails for a non-exists error', async () => {
