@@ -33,6 +33,8 @@ A plugin can also ship a `<name>.ql-plugin.json` file next to its `.py` file. QL
 
 ## Download Plugins
 
+![A plugin repository expanded, showing its plugin list](../images/plugin-repositories.png)
+
 1. Expand a repository and tick the plugins you want.
 2. A plugin that doesn't declare its runtime needs one picked in its row before **Download selected** is enabled.
 3. Click **Download selected**.

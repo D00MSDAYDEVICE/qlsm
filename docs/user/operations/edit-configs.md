@@ -61,6 +61,8 @@ Use **Upload** when you want to bring in an existing file from another server. U
 
 In `.cfg` files the editor suggests console commands at the start of a line, and cvar names after `set` or `seta`. Each suggestion shows a short description and, underneath it, **where that description came from** — so a line that was read off the cvar's name is never mistaken for a verified fact.
 
+![Cvar autocomplete in server.cfg, with the description panel open](../images/cvar-autocomplete.png)
+
 Two things are suggested, from two different places:
 
 - **Engine and server cvars** come from the catalog the server keeps in `ui/data/ql_cvar_catalog.json`. It lists every cvar a live Quake Live dedicated server registers (a `listcvars` dump), with descriptions taken from the game's own annotated `server.cfg`, from its factory definitions, and from verified reference notes. Bitmask settings such as `g_startingWeapons` and `g_voteFlags` show their bit table, and settings the official factories use show real example values. Regenerate the catalog with `python scripts/gen_cvar_catalog.py` after refreshing its inputs in `scripts/cvar-catalog/`.
@@ -207,6 +209,8 @@ If that file declares a `cvars` list, a settings (gear) icon appears next to the
 - **Toggle** for `bool` cvars.
 - **Number field** (with min/max, when the manifest sets them) for `number` cvars.
 - **Text field** for `string` cvars.
+
+![The plugin settings dialog for a plugin that declares cvars](../images/plugin-cvars-modal.png)
 
 Saving writes each edited cvar as a `set <cvar> "<value>"` line into `server.cfg` — the same mechanism used to sync the **Hostname** field with `sv_hostname`. Only settings you change are written. Settings you don't touch are left as they are: an existing line stays unchanged, and a setting with no line gets no new one, so the plugin keeps using its own default (including a new default from a later plugin update). Saving without changes leaves `server.cfg` untouched. Clearing a text field writes it as `""`. This is plain text editing under the hood, so it's still visible and editable directly in the **Config** tab afterward.
 
