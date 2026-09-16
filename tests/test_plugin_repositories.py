@@ -259,6 +259,25 @@ def test_download_plugin_refuses_to_overwrite_an_existing_pool_file(tmp_path, mo
     assert (pool / 'balance.py').read_text() == '# bundled copy'
 
 
+def test_download_plugin_leaves_a_matching_pool_file_alone_without_prompting(tmp_path, monkeypatch):
+    """The repo copy differs only in CRLF line endings: no 'exists' error, the
+    local LF copy is kept as is, and the sidecar still syncs."""
+    monkeypatch.chdir(tmp_path)
+    pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    pool.mkdir(parents=True)
+    (pool / 'balance.py').write_bytes(b'import minqlx\nprint("same")\n')
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(200, b'{"label": "Balance"}')
+        return FakeResponse(200, b'import minqlx\r\nprint("same")\r\n')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    download_plugin('https://example.com/repo', 'balance.py', 'minqlx')
+    assert (pool / 'balance.py').read_bytes() == b'import minqlx\nprint("same")\n'
+    assert (pool / 'balance.ql-plugin.json').read_bytes() == b'{"label": "Balance"}'
+
+
 def test_download_plugin_overwrite_true_replaces_the_existing_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'

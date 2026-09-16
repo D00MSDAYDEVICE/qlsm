@@ -48,7 +48,7 @@ Inline `cvars`/`commands` need QLSM 1.36.0 or newer. Older versions ignore them.
 3. Click **Download selected**.
 
 - Each plugin goes into the shared plugin folder for its runtime.
-- If a file with the same name is already there, QLSM asks before overwriting it. Each file in that prompt has a checkbox and a **Diff** button. Untick any file you want to keep, and click **Diff** to compare this server's copy (left) with the repository's copy (right) first. Removed lines are red, added lines green, and unchanged sections are folded. Overwriting a plugin also replaces its `.ql-plugin.json` sidecar with the repository's, or removes it when the repository has none; the diff only compares the `.py` file.
+- If a file with the same name is already there and its code differs, QLSM asks before overwriting it (a copy that only differs in line endings is left as is). Each file in that prompt has a checkbox and a **Diff** button. Untick any file you want to keep, and click **Diff** to compare this server's copy (left) with the repository's copy (right) first. Removed lines are red, added lines green, and unchanged sections are folded. Overwriting a plugin also replaces its `.ql-plugin.json` sidecar with the repository's, or removes it when the repository has none; the diff only compares the `.py` file.
 
 ![The overwrite prompt listing two existing plugins](../images/plugin-overwrite-prompt.png)
 

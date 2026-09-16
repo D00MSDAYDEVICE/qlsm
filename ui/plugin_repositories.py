@@ -87,6 +87,12 @@ def _fetch(url, max_size):
     return content
 
 
+def _normalize_eol(data):
+    """CRLF/CR -> LF, so two copies of a plugin that differ only in line
+    endings compare equal (CodeMirror shows them as identical too)."""
+    return data.replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+
+
 def fetch_plugin_source(base_url, filename):
     """The raw bytes of <base_url>/<filename>, under the plugin size cap.
     Shared by download and diff so both read exactly the same URL."""
@@ -285,7 +291,8 @@ def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifes
     PluginRepositoryError if the plugin source itself can't be fetched; a
     missing, malformed or non-object separate sidecar is not an error.
 
-    Refuses to replace a file already in the pool unless `overwrite` is set:
+    Refuses to replace a file already in the pool unless `overwrite` is set
+    (a copy that matches apart from line endings is left alone instead):
     a repo plugin sharing a name with a bundled one (e.g. balance.py) would
     otherwise silently replace it, and that copy then ships to every host and
     breaks the manifest.json sha256 baseline. The caller (the route) is the
@@ -297,14 +304,21 @@ def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifes
     pool_dir = shared_pool_dir(runtime)
     os.makedirs(pool_dir, exist_ok=True)
     dest_path = os.path.join(pool_dir, filename)
-    if os.path.exists(dest_path) and not overwrite:
-        raise PluginRepositoryError(
-            f"{filename} already exists in the local pool.", code='exists',
-        )
 
     source = fetch_plugin_source(base_url, filename)
-    with open(dest_path, 'wb') as f:
-        f.write(source)
+    if os.path.exists(dest_path) and not overwrite:
+        # Same code already in the pool (ignoring CRLF/LF) is "up to date",
+        # not a collision: keep the local copy as is and only sync the
+        # sidecar below. Otherwise the operator decides via the prompt.
+        with open(dest_path, 'rb') as f:
+            existing = f.read()
+        if _normalize_eol(existing) != _normalize_eol(source):
+            raise PluginRepositoryError(
+                f"{filename} already exists in the local pool.", code='exists',
+            )
+    else:
+        with open(dest_path, 'wb') as f:
+            f.write(source)
 
     manifest_filename = filename[:-len('.py')] + '.ql-plugin.json'
     manifest_path = os.path.join(pool_dir, manifest_filename)
