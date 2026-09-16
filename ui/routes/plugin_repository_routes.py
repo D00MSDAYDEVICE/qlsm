@@ -8,6 +8,7 @@ from ui import db
 from ui.models import PluginRepository
 from ui.plugin_repositories import (
     PluginRepositoryError,
+    build_inline_manifest,
     download_plugin,
     fetch_manifest,
     github_raw_bases,
@@ -183,8 +184,15 @@ def download_plugin_repository_plugins(repo_id):
     pool it lands in -- the manifest's own declared runtime (looked up from
     the last synced list) when it has one, else the operator's pick for that
     file in `runtimes` ({filename: runtime}), since a repo entry may leave
-    `runtime` unset. A pick never overrides a declared runtime. `overwrite: true` in the body is required to
-    replace a pool file that already exists -- see download_plugin()."""
+    `runtime` unset. A pick never overrides a declared runtime.
+
+    The repo manifest is re-fetched once per request so each plugin's inline
+    metadata (label/description/cvars/commands) matches the file downloaded;
+    that fresh list feeds metadata only, and a plugin missing from it (or a
+    failed fetch) falls back to the last-synced entry.
+
+    `overwrite: true` in the body is required to replace a pool file that
+    already exists -- see download_plugin()."""
     repo = db.session.get(PluginRepository, repo_id)
     if not repo:
         return jsonify({'error': {'message': 'Repository not found.'}}), 404
@@ -206,6 +214,16 @@ def download_plugin_repository_plugins(repo_id):
     for entry in repo.to_dict()['plugins']:
         known_by_filename[entry['filename']] = entry
 
+    # Re-read the repo manifest so the cvars written next to each .py match
+    # the .py being downloaded right now, not whatever the last sync saw.
+    # Metadata only: runtime resolution stays on the stored entry above (the
+    # list the UI showed and the operator acted on). Not persisted -- _sync()
+    # stays the one writer of manifest_json.
+    try:
+        fresh_by_filename = {fresh['filename']: fresh for fresh in fetch_manifest(repo.url)}
+    except PluginRepositoryError:
+        fresh_by_filename = {}
+
     downloaded, errors = [], []
     for filename in data['filenames']:
         if not isinstance(filename, str):
@@ -221,7 +239,10 @@ def download_plugin_repository_plugins(repo_id):
             })
             continue
         try:
-            download_plugin(repo.url, filename, normalize_runtime(runtime), overwrite=overwrite)
+            download_plugin(
+                repo.url, filename, normalize_runtime(runtime), overwrite=overwrite,
+                inline_manifest=build_inline_manifest(fresh_by_filename.get(filename) or entry),
+            )
             downloaded.append(filename)
         except PluginRepositoryError as e:
             errors.append({'filename': filename, 'error': str(e), 'code': e.code})

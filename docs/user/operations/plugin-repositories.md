@@ -23,13 +23,21 @@ A repository's `qlsm-plugins.json` looks like this. Every field except `filename
       "label": "Hello QLSM",
       "description": "Replies to !hello.",
       "runtime": "minqlxtended",
-      "requires_qlsm_version": "1.30.0"
-    }
+      "requires_qlsm_version": "1.36.0",
+      "cvars": [
+        { "cvar": "qlx_helloMessage", "label": "Reply text", "type": "string", "default": "Hello!", "description": "What !hello replies with." }
+      ]
+    },
+    { "filename": "another_plugin.py" }
   ]
 }
 ```
 
-A plugin can also ship a `<name>.ql-plugin.json` file next to its `.py` file. QLSM downloads it too, which gives the plugin a label, a description and an editable settings form (see [Plugin Settings](edit-configs.md#plugin-settings-cvars)).
+One file describes every plugin in the repository. `cvars` (and `commands`) use the same format as a `.ql-plugin.json` file. When you download a plugin, QLSM saves its label, description, cvars and commands next to it, which gives it an editable settings form (see [Plugin Settings](edit-configs.md#plugin-settings-cvars)).
+
+A plugin can still ship its own `<name>.ql-plugin.json` file next to its `.py` file. If it does, QLSM uses that file instead of the plugin's entry in `qlsm-plugins.json`.
+
+Inline `cvars`/`commands` need QLSM 1.36.0 or newer. Older versions ignore them.
 
 ## Download Plugins
 
