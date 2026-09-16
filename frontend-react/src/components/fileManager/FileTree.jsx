@@ -163,7 +163,9 @@ function TreeItem({
             />
           )}
           <Icon className={`w-4 h-4 flex-shrink-0 ${iconColor}`} />
-          <span className={`truncate min-w-0 ${showFolderHint ? '' : 'flex-1'}`}>{displayLabel}</span>
+          {/* No flex-1: the label shrinks to its text so the manifest tooltip sits
+              right after the filename instead of being pushed out to the badge. */}
+          <span className="truncate min-w-0">{displayLabel}</span>
           {manifestDescription && (
             <InfoTooltip
               text={manifestDescription}
@@ -188,26 +190,36 @@ function TreeItem({
           {item.protected && (
             <Lock className="w-3 h-3 flex-shrink-0 text-[var(--text-muted)]" />
           )}
-          {item.shared && (
-            <span
-              className="flex-shrink-0 rounded border border-[var(--surface-border)] px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]"
-              title={SHARED_PLUGIN_TITLE}
-              data-testid={`plugin-shared-${item.path}`}
-            >
-              shared
-            </span>
-          )}
         </button>
-        {pluginCvars.length > 0 && (
-          <button
-            type="button"
-            onClick={() => onEditCvars(item, pluginCvars)}
-            className="flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            title="Edit plugin settings"
-            data-testid={`plugin-cvars-${item.path}`}
+        {/* Trailing cluster, in a fixed order: badge, cvars gear, row menu. The
+            badge sits outside the name button so it lands at the same offset on
+            every row rather than being pushed around by the name's width. */}
+        {item.shared && (
+          <span
+            className="flex-shrink-0 rounded border border-[var(--surface-border)] px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]"
+            title={SHARED_PLUGIN_TITLE}
+            data-testid={`plugin-shared-${item.path}`}
           >
-            <Settings size={13} />
-          </button>
+            shared
+          </span>
+        )}
+        {/* The gear keeps its slot even on rows with no cvars, so a row that has
+            one doesn't shove the badge left of where it sits on every other row.
+            Only in the Plugins tab, where a gear can appear at all. */}
+        {rootOnly && onEditCvars && (
+          <span className="flex w-[13px] flex-shrink-0 items-center justify-center">
+            {pluginCvars.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onEditCvars(item, pluginCvars)}
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                title="Edit plugin settings"
+                data-testid={`plugin-cvars-${item.path}`}
+              >
+                <Settings size={13} />
+              </button>
+            )}
+          </span>
         )}
         <FileTreeRowMenu
           itemType={item.type}

@@ -292,6 +292,71 @@ describe('FileTree', () => {
       expect(screen.queryByTestId('plugin-cvars-essentials.py')).not.toBeInTheDocument();
     });
 
+    // The trailing controls are a fixed order — badge, cvars gear, row menu —
+    // and the gear keeps its slot when a row has no cvars, so the badge lands
+    // at the same offset on every row instead of sliding right.
+    it('orders the trailing controls badge, gear, then row menu', () => {
+      render(
+        <FolderHarness
+          files={[
+            {
+              name: 'essentials.py',
+              path: 'essentials.py',
+              type: 'file',
+              shared: true,
+              plugin_manifest: { cvars: [{ cvar: 'qlx_foo', type: 'bool' }] },
+            },
+          ]}
+          foldersEnabled
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+          onEditCvars={vi.fn()}
+        />,
+      );
+
+      const badge = screen.getByTestId('plugin-shared-essentials.py');
+      const gear = screen.getByTestId('plugin-cvars-essentials.py');
+      const menu = screen.getByRole('button', { name: /file actions/i });
+
+      expect(badge.compareDocumentPosition(gear) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(gear.compareDocumentPosition(menu) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // The badge must sit outside the name button, or the name's width moves it.
+      expect(badge.closest('button')).toBeNull();
+    });
+
+    it('keeps an empty gear slot on a plugin row with no cvars', () => {
+      const { container } = render(
+        <FolderHarness
+          files={[{ name: 'essentials.py', path: 'essentials.py', type: 'file', shared: true }]}
+          foldersEnabled
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+          onEditCvars={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByTestId('plugin-cvars-essentials.py')).not.toBeInTheDocument();
+      const slot = container.querySelector('.w-\\[13px\\]');
+      expect(slot).toBeInTheDocument();
+      expect(slot).toBeEmptyDOMElement();
+    });
+
+    it('reserves no gear slot outside the Plugins tab', () => {
+      const { container } = render(
+        <FolderHarness
+          files={[{ name: 'server.cfg', path: 'server.cfg', type: 'file' }]}
+          foldersEnabled
+          capabilities={{}}
+        />,
+      );
+
+      expect(container.querySelector('.w-\\[13px\\]')).toBeNull();
+    });
+
     it('omits the cvars settings button when onEditCvars is not passed', () => {
       render(
         <FolderHarness
