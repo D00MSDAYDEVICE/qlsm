@@ -343,7 +343,12 @@ class PluginRepository(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False, unique=True)
-    url = db.Column(db.String(500), nullable=False)
+    url = db.Column(db.String(500), nullable=False)  # what qlsm fetches from
+    # What the operator typed, when it differs from `url` -- a github.com repo
+    # URL is stored resolved to its raw.githubusercontent.com form, but the
+    # card should still show the address they recognize. NULL means they are
+    # the same.
+    display_url = db.Column(db.String(500), nullable=True)
     manifest_json = db.Column(db.Text, nullable=True)  # last-fetched qlsm-plugins.json, verbatim
     last_synced_at = db.Column(db.DateTime, nullable=True)
     last_sync_error = db.Column(db.String(500), nullable=True)
@@ -359,7 +364,8 @@ class PluginRepository(db.Model):
         return {
             'id': self.id,
             'name': self.name,
-            'url': self.url,
+            'url': self.display_url or self.url,
+            'fetch_url': self.url,
             'plugins': plugins,
             'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'last_sync_error': self.last_sync_error,

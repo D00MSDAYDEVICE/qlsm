@@ -1197,6 +1197,23 @@ All entries are lists of `{"steam_id64": "76561198...", "level": 0-5}`, de-dupli
 
 A failed write (SSH or Redis unreachable) appends a warning to the instance log; the deploy or apply itself still succeeds. The write also deletes any `minqlx:qlsm:managed_admins*` keys left behind by older QLSM versions.
 
+## Plugin Repositories
+
+External sources of plugins, fetched over HTTP and downloaded into the shared plugin pool (`ql-assets/data/<runtime>-plugins/`). See `ui/plugin_repositories.py`.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/plugin-repositories/` | GET | List repositories with their last-synced plugin list |
+| `/plugin-repositories/` | POST | Add a repository (`name`, `url`) and sync it immediately |
+| `/plugin-repositories/<id>/sync` | POST | Re-fetch `<url>/qlsm-plugins.json` |
+| `/plugin-repositories/<id>` | DELETE | Remove the repository (downloaded files stay) |
+| `/plugin-repositories/<id>/download` | POST | Download `filenames` into the pool; optional `runtimes` ({filename: runtime}) fills in entries that declare none, and `overwrite: true` replaces existing pool files |
+
+- A `github.com` repository URL is resolved to its `raw.githubusercontent.com` base on add (trying `main`, then `master`, unless the URL names a branch). `url` in responses is what the operator typed; `fetch_url` is what QLSM fetches.
+- Names are unique ignoring case, and a URL cannot be added twice in either form.
+- Download responses are `{downloaded: [...], errors: [{filename, error, code}]}` with 200 (all fine), 207 (partial) or 502 (none). `code: "exists"` means the pool already has that filename.
+
+
 ## Settings
 
 | Endpoint | Method | Description |

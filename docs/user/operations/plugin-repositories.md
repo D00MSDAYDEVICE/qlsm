@@ -4,8 +4,12 @@
 
 ## Add A Repository
 
-1. Click **Add Repository** and enter a name and the repository's base URL.
+1. Click **Add Repository** and enter a name and the repository's URL.
 2. QLSM fetches `<URL>/qlsm-plugins.json` right away and lists the plugins it describes.
+
+**GitHub links work directly.** Paste the repository page URL, for example `https://github.com/D00MSDAYDEVICE/minqlx`, and QLSM converts it to the raw file address itself, looking on the `main` branch and then `master`. The card keeps showing the address you typed. To use another branch or a subfolder, paste that page's URL, such as `https://github.com/owner/repo/tree/dev/plugins`. Private repositories aren't supported.
+
+Any other file host works too, as long as the files are served directly. The URL is treated as a folder that holds `qlsm-plugins.json` and the plugins.
 
 Names must be unique (ignoring case), and a URL can only be added once (ignoring a trailing `/`). Click the sync icon on a repository to fetch its list again.
 

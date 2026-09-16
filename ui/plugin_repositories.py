@@ -67,6 +67,65 @@ def _fetch(url, max_size):
     return content
 
 
+# GitHub's repository page serves HTML, not files, so a pasted repo URL has to
+# become a raw.githubusercontent.com base before anything can be fetched from
+# it. The branch is rarely in the URL, so both common defaults are tried in
+# turn (cheaper and more reliable than the rate-limited GitHub API).
+GITHUB_BRANCH_CANDIDATES = ('main', 'master')
+_GITHUB_REPO_RE = re.compile(
+    r'^https?://(?:www\.)?github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?'
+    r'(?:/tree/(?P<branch>[^/]+)(?P<subdir>/.*)?)?/?$'
+)
+_GITHUB_RAW_BASE = 'https://raw.githubusercontent.com'
+
+
+def github_raw_bases(url):
+    """Raw base URLs to try for a github.com repository URL, best first.
+
+    Returns [] for anything else (including a raw URL already), which the
+    caller treats as "use this URL as given". A URL naming its own branch
+    (/tree/<branch>, optionally with a subfolder) yields exactly one
+    candidate; otherwise one per GITHUB_BRANCH_CANDIDATES.
+    """
+    match = _GITHUB_REPO_RE.match((url or '').strip())
+    if not match:
+        return []
+    owner, repo = match.group('owner'), match.group('repo')
+    subdir = (match.group('subdir') or '').strip('/')
+    tail = f'/{subdir}' if subdir else ''
+    branches = [match.group('branch')] if match.group('branch') else list(GITHUB_BRANCH_CANDIDATES)
+    return [f'{_GITHUB_RAW_BASE}/{owner}/{repo}/{branch}{tail}/' for branch in branches]
+
+
+def resolve_manifest_source(url, fetch=None):
+    """(fetch_url, plugins) for a repository URL the operator typed.
+
+    A github.com URL is rewritten to its raw form and each branch candidate
+    tried until one serves a manifest; every other URL is fetched as given.
+    Raises PluginRepositoryError when nothing works -- naming the branches
+    tried, since "not valid JSON" would not tell the operator what to fix.
+    `fetch` is the manifest fetcher to use, so the caller can pass the name
+    its own module exports (which is what tests patch).
+    """
+    fetch = fetch or fetch_manifest
+    candidates = github_raw_bases(url)
+    if not candidates:
+        return url, fetch(url)
+
+    last_error = None
+    for candidate in candidates:
+        try:
+            return candidate, fetch(candidate)
+        except PluginRepositoryError as e:
+            last_error = e
+    if len(candidates) > 1:
+        raise PluginRepositoryError(
+            f"No {MANIFEST_FILENAME} found in that repository on "
+            f"{' or '.join(GITHUB_BRANCH_CANDIDATES)}."
+        )
+    raise last_error
+
+
 def _manifest_url(base_url):
     return base_url.rstrip('/') + '/' + MANIFEST_FILENAME
 

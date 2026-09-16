@@ -242,3 +242,62 @@ def test_download_plugin_removes_a_stale_sidecar_when_the_new_copy_has_none(tmp_
 
     assert (pool / 'demo_plugin.py').read_bytes() == b'print("new copy")'
     assert not (pool / 'demo_plugin.ql-plugin.json').exists()
+
+
+# --- github.com URL resolution ---
+
+def test_github_raw_bases_tries_both_default_branches():
+    assert plugin_repositories.github_raw_bases('https://github.com/D00MSDAYDEVICE/minqlx') == [
+        'https://raw.githubusercontent.com/D00MSDAYDEVICE/minqlx/main/',
+        'https://raw.githubusercontent.com/D00MSDAYDEVICE/minqlx/master/',
+    ]
+
+
+def test_github_raw_bases_accepts_trailing_slash_and_git_suffix():
+    expected = 'https://raw.githubusercontent.com/owner/repo/main/'
+    for url in ('https://github.com/owner/repo/', 'https://github.com/owner/repo.git',
+                'http://www.github.com/owner/repo'):
+        assert plugin_repositories.github_raw_bases(url)[0] == expected
+
+
+def test_github_raw_bases_uses_the_branch_and_subfolder_in_the_url():
+    assert plugin_repositories.github_raw_bases('https://github.com/owner/repo/tree/dev/plugins') == [
+        'https://raw.githubusercontent.com/owner/repo/dev/plugins/',
+    ]
+
+
+def test_github_raw_bases_ignores_other_urls():
+    assert plugin_repositories.github_raw_bases('https://example.com/plugins/') == []
+    assert plugin_repositories.github_raw_bases(
+        'https://raw.githubusercontent.com/owner/repo/main/') == []
+
+
+def test_resolve_manifest_source_falls_through_to_the_second_branch():
+    tried = []
+
+    def fake_fetch(url):
+        tried.append(url)
+        if '/main/' in url:
+            raise plugin_repositories.PluginRepositoryError('404')
+        return [{'filename': 'a.py'}]
+
+    fetch_url, plugins = plugin_repositories.resolve_manifest_source(
+        'https://github.com/owner/repo', fake_fetch)
+    assert fetch_url == 'https://raw.githubusercontent.com/owner/repo/master/'
+    assert plugins == [{'filename': 'a.py'}]
+    assert len(tried) == 2
+
+
+def test_resolve_manifest_source_reports_both_branches_when_neither_has_a_manifest():
+    def fake_fetch(url):
+        raise plugin_repositories.PluginRepositoryError('404')
+
+    with pytest.raises(plugin_repositories.PluginRepositoryError) as excinfo:
+        plugin_repositories.resolve_manifest_source('https://github.com/owner/repo', fake_fetch)
+    assert 'main or master' in str(excinfo.value)
+
+
+def test_resolve_manifest_source_leaves_a_plain_url_alone():
+    fetch_url, _ = plugin_repositories.resolve_manifest_source(
+        'https://example.com/plugins/', lambda url: [])
+    assert fetch_url == 'https://example.com/plugins/'

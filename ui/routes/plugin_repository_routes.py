@@ -10,6 +10,7 @@ from ui.plugin_repositories import (
     PluginRepositoryError,
     download_plugin,
     fetch_manifest,
+    resolve_manifest_source,
     version_risk,
 )
 from ui.runtime import is_valid_runtime, normalize_runtime
@@ -39,11 +40,26 @@ def _validate_url(url):
     return url, None
 
 
-def _sync(repo):
+def _repo_urls(repo):
+    """Both addresses a repository answers to: what qlsm fetches, and what
+    the operator typed if that was rewritten."""
+    return {u.rstrip('/') for u in (repo.url, repo.display_url) if u}
+
+
+def _sync(repo, resolve=False):
     """Fetch the manifest, annotate each entry with its version risk, and
-    persist the result. Returns (ok, error_message)."""
+    persist the result. Returns (ok, error_message).
+
+    `resolve` is for the first sync of a newly added repository: the operator
+    may have typed a github.com repo URL, which has to be resolved to a raw
+    base (and a branch found) before anything can be fetched. Later syncs go
+    straight to the resolved `repo.url`.
+    """
     try:
-        plugins = fetch_manifest(repo.url)
+        if resolve:
+            repo.url, plugins = resolve_manifest_source(repo.url, fetch_manifest)
+        else:
+            plugins = fetch_manifest(repo.url)
     except PluginRepositoryError as e:
         repo.last_sync_error = str(e)
         return False, str(e)
@@ -87,12 +103,15 @@ def create_plugin_repository():
     existing = PluginRepository.query.all()
     if any(r.name.lower() == name.lower() for r in existing):
         return jsonify({'error': {'message': f"Repository '{name}' already exists."}}), 409
-    same_url = next((r for r in existing if r.url.rstrip('/') == url.rstrip('/')), None)
+    same_url = next((r for r in existing if url.rstrip('/') in _repo_urls(r)), None)
     if same_url:
         return jsonify({'error': {'message': f"This URL is already added as '{same_url.name}'."}}), 409
 
     repo = PluginRepository(name=name, url=url)
-    _sync(repo)
+    _sync(repo, resolve=True)
+    # Only worth keeping when resolution actually rewrote it (a github.com
+    # URL -> its raw base); otherwise the card would repeat the same string.
+    repo.display_url = url if repo.url != url else None
 
     try:
         db.session.add(repo)

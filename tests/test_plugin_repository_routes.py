@@ -341,3 +341,40 @@ def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, mo
     )
     assert retried.status_code == 200
     assert retried.get_json()['downloaded'] == ['balance2.py']
+
+
+def test_create_repository_stores_the_raw_url_and_keeps_what_was_typed(client, app, monkeypatch):
+    """A github.com repo URL is unusable for fetching (it serves HTML), so it
+    is resolved to a raw base -- but the card still shows the typed URL."""
+    _patch_fetch(monkeypatch)
+    make_user(app, 'creator7', 'creatorpass')
+    headers = auth_headers(app, 'creator7')
+
+    response = client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'Doom', 'url': 'https://github.com/D00MSDAYDEVICE/minqlx',
+    })
+
+    assert response.status_code == 201
+    data = response.get_json()['data']
+    assert data['url'] == 'https://github.com/D00MSDAYDEVICE/minqlx'
+    assert data['fetch_url'] == 'https://raw.githubusercontent.com/D00MSDAYDEVICE/minqlx/main/'
+    assert data['plugins']
+
+
+def test_create_repository_rejects_a_url_already_added_in_its_other_form(client, app, monkeypatch):
+    _patch_fetch(monkeypatch)
+    make_user(app, 'creator8', 'creatorpass')
+    headers = auth_headers(app, 'creator8')
+    client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'Doom', 'url': 'https://github.com/D00MSDAYDEVICE/minqlx',
+    })
+
+    raw = client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'Doom Raw', 'url': 'https://raw.githubusercontent.com/D00MSDAYDEVICE/minqlx/main/',
+    })
+    typed_again = client.post('/api/plugin-repositories/', headers=headers, json={
+        'name': 'Doom Again', 'url': 'https://github.com/D00MSDAYDEVICE/minqlx/',
+    })
+
+    assert raw.status_code == 409
+    assert typed_again.status_code == 409
