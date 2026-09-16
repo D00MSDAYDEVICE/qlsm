@@ -569,3 +569,17 @@ def test_create_repository_rejects_a_url_already_added_in_its_other_form(client,
 
     assert raw.status_code == 409
     assert typed_again.status_code == 409
+
+
+# --- _resolve_runtime ---
+
+@pytest.mark.parametrize('declared, picked, expected', [
+    ('minqlx', 'minqlxtended', 'minqlx'),   # declared valid wins over the pick
+    ('retired', 'minqlxtended', 'minqlxtended'),  # declared invalid falls through
+    ('retired', 'nope', None),               # both invalid
+    (None, None, None),                      # nothing to resolve
+    ('MinQLX', None, 'minqlx'),              # result is normalized
+])
+def test_resolve_runtime(declared, picked, expected):
+    entry = {'filename': 'x.py', 'runtime': declared} if declared is not None else None
+    assert plugin_repository_routes._resolve_runtime(entry, picked) == expected

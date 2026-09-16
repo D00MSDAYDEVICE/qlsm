@@ -50,6 +50,19 @@ def _repo_urls(repo):
     return {u.rstrip('/') for u in (repo.url, repo.display_url) if u}
 
 
+def _resolve_runtime(entry, picked):
+    """The pool a repo file belongs to: the runtime its manifest entry
+    declares, else the operator's pick, else None. Download and diff both go
+    through here, so they can never compare against a different pool than
+    the one a download writes to."""
+    declared = (entry or {}).get('runtime')
+    if is_valid_runtime(declared):
+        return normalize_runtime(declared)
+    if is_valid_runtime(picked):
+        return normalize_runtime(picked)
+    return None
+
+
 def _sync(repo, resolve=False):
     """Fetch the manifest, annotate each entry with its version risk, and
     persist the result. Returns (ok, error_message).
@@ -232,9 +245,8 @@ def download_plugin_repository_plugins(repo_id):
             errors.append({'filename': filename, 'error': 'Not a string.'})
             continue
         entry = known_by_filename.get(filename)
-        declared_runtime = (entry or {}).get('runtime')
-        runtime = declared_runtime if is_valid_runtime(declared_runtime) else picked_runtimes.get(filename)
-        if not is_valid_runtime(runtime):
+        runtime = _resolve_runtime(entry, picked_runtimes.get(filename))
+        if runtime is None:
             errors.append({
                 'filename': filename,
                 'error': 'No runtime declared for this plugin. Pick one for it before downloading.',
@@ -242,7 +254,7 @@ def download_plugin_repository_plugins(repo_id):
             continue
         try:
             download_plugin(
-                repo.url, filename, normalize_runtime(runtime), overwrite=overwrite,
+                repo.url, filename, runtime, overwrite=overwrite,
                 inline_manifest=build_inline_manifest(fresh_by_filename.get(filename) or entry),
             )
             downloaded.append(filename)
