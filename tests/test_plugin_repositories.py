@@ -189,7 +189,7 @@ def test_download_plugin_writes_source_into_the_matching_pool(tmp_path, monkeypa
     monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx')
 
-    written = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.py'
+    written = tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'demo_plugin.py'
     assert written.read_bytes() == b'print("hello")'
     assert calls[0] == 'https://example.com/repo/demo_plugin.py'
 
@@ -205,7 +205,7 @@ def test_download_plugin_also_writes_a_valid_sidecar_manifest(tmp_path, monkeypa
     monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlxtended')
 
-    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlxtended-plugins' / 'demo_plugin.ql-plugin.json'
+    manifest_path = tmp_path / 'data' / 'shared-plugins' / 'minqlxtended' / 'demo_plugin.ql-plugin.json'
     assert manifest_path.read_text() == '{"label": "Demo"}'
 
 
@@ -220,7 +220,7 @@ def test_download_plugin_skips_a_malformed_sidecar_without_failing(tmp_path, mon
     monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx')
 
-    pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    pool = tmp_path / 'data' / 'shared-plugins' / 'minqlx'
     assert (pool / 'demo_plugin.py').exists()
     assert not (pool / 'demo_plugin.ql-plugin.json').exists()
 
@@ -244,7 +244,7 @@ def test_download_plugin_raises_when_source_fetch_fails(tmp_path, monkeypatch):
 
 def test_download_plugin_refuses_to_overwrite_an_existing_pool_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    pool = tmp_path / 'data' / 'shared-plugins' / 'minqlx'
     pool.mkdir(parents=True)
     (pool / 'balance.py').write_text('# bundled copy')
 
@@ -263,7 +263,7 @@ def test_download_plugin_leaves_a_matching_pool_file_alone_without_prompting(tmp
     """The repo copy differs only in CRLF line endings: no 'exists' error, the
     local LF copy is kept as is, and the sidecar still syncs."""
     monkeypatch.chdir(tmp_path)
-    pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    pool = tmp_path / 'data' / 'shared-plugins' / 'minqlx'
     pool.mkdir(parents=True)
     (pool / 'balance.py').write_bytes(b'import minqlx\nprint("same")\n')
 
@@ -280,7 +280,7 @@ def test_download_plugin_leaves_a_matching_pool_file_alone_without_prompting(tmp
 
 def test_download_plugin_overwrite_true_replaces_the_existing_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    pool = tmp_path / 'data' / 'shared-plugins' / 'minqlx'
     pool.mkdir(parents=True)
     (pool / 'balance.py').write_text('# bundled copy')
 
@@ -296,7 +296,7 @@ def test_download_plugin_overwrite_true_replaces_the_existing_file(tmp_path, mon
 
 def test_download_plugin_removes_a_stale_sidecar_when_the_new_copy_has_none(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    pool = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    pool = tmp_path / 'data' / 'shared-plugins' / 'minqlx'
     pool.mkdir(parents=True)
     (pool / 'demo_plugin.py').write_text('# old copy')
     (pool / 'demo_plugin.ql-plugin.json').write_text('{"label": "Old"}')
@@ -325,7 +325,7 @@ def test_download_plugin_writes_inline_manifest_when_repo_has_no_sidecar(tmp_pat
     inline = {'label': 'Demo', 'cvars': [{'cvar': 'qlx_demo', 'type': 'bool', 'default': False}]}
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx', inline_manifest=inline)
 
-    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    manifest_path = tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'demo_plugin.ql-plugin.json'
     assert json.loads(manifest_path.read_text()) == inline
 
 
@@ -341,7 +341,7 @@ def test_download_plugin_separate_sidecar_wins_over_inline(tmp_path, monkeypatch
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx',
                     inline_manifest={'label': 'From inline'})
 
-    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    manifest_path = tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'demo_plugin.ql-plugin.json'
     assert manifest_path.read_text() == '{"label": "From sidecar"}'
 
 
@@ -360,7 +360,7 @@ def test_download_plugin_unusable_sidecar_falls_back_to_inline(tmp_path, monkeyp
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx',
                     inline_manifest={'label': 'From inline'})
 
-    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    manifest_path = tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'demo_plugin.ql-plugin.json'
     assert json.loads(manifest_path.read_text()) == {'label': 'From inline'}
 
 
@@ -388,7 +388,7 @@ def test_download_plugin_inline_manifest_at_the_cap_is_written_within_the_cap(tm
     monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
     download_plugin('https://example.com/repo', 'demo_plugin.py', 'minqlx', inline_manifest=inline)
 
-    manifest_path = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins' / 'demo_plugin.ql-plugin.json'
+    manifest_path = tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'demo_plugin.ql-plugin.json'
     assert os.path.getsize(manifest_path) <= PLUGIN_MANIFEST_MAX_SIZE
     assert json.loads(manifest_path.read_text()) == inline
 
@@ -483,3 +483,59 @@ def test_fetch_plugin_source_raises_on_http_error(monkeypatch):
     monkeypatch.setattr(plugin_repositories.requests, 'get', lambda url, timeout: FakeResponse(404, b''))
     with pytest.raises(PluginRepositoryError, match='HTTP 404'):
         fetch_plugin_source('https://example.com/repo', 'demo.py')
+
+
+def test_download_plugin_refuses_to_shadow_a_built_in_plugin(tmp_path, monkeypatch):
+    """A repo plugin sharing a name with a bundled one hits the same 'exists'
+    prompt as an earlier download, and nothing is written to either tier."""
+    monkeypatch.chdir(tmp_path)
+    builtin = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    builtin.mkdir(parents=True)
+    (builtin / 'balance.py').write_text('# bundled copy')
+
+    monkeypatch.setattr(
+        plugin_repositories.requests, 'get',
+        lambda url, timeout: FakeResponse(200, b'print("repo copy")'),
+    )
+    with pytest.raises(PluginRepositoryError) as excinfo:
+        download_plugin('https://example.com/repo', 'balance.py', 'minqlx')
+    assert excinfo.value.code == 'exists'
+    assert (builtin / 'balance.py').read_text() == '# bundled copy'
+    assert not (tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'balance.py').exists()
+
+
+def test_download_plugin_overwrite_shadows_the_built_in_without_touching_it(tmp_path, monkeypatch):
+    """overwrite=True writes the operator copy; the image's built-in file is
+    never modified."""
+    monkeypatch.chdir(tmp_path)
+    builtin = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    builtin.mkdir(parents=True)
+    (builtin / 'balance.py').write_text('# bundled copy')
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(404, b'')
+        return FakeResponse(200, b'print("repo copy")')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    download_plugin('https://example.com/repo', 'balance.py', 'minqlx', overwrite=True)
+
+    operator = tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'balance.py'
+    assert operator.read_bytes() == b'print("repo copy")'
+    assert (builtin / 'balance.py').read_text() == '# bundled copy'
+
+
+def test_download_plugin_matching_built_in_is_left_alone(tmp_path, monkeypatch):
+    """Same code as the bundled copy: no prompt and no operator copy either,
+    so the built-in keeps receiving release updates."""
+    monkeypatch.chdir(tmp_path)
+    builtin = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    builtin.mkdir(parents=True)
+    (builtin / 'balance.py').write_bytes(b'print("same")\n')
+
+    monkeypatch.setattr(
+        plugin_repositories.requests, 'get',
+        lambda url, timeout: FakeResponse(200 if url.endswith('.py') else 404, b'print("same")\r\n' if url.endswith('.py') else b''),
+    )
+    download_plugin('https://example.com/repo', 'balance.py', 'minqlx')
+    assert not (tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'balance.py').exists()

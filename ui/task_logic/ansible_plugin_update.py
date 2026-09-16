@@ -5,11 +5,12 @@
 # the two diffs the check produces:
 #
 #  - host common pool: re-runs the existing update_common_plugins.yml
-#    playbook (full rsync --archive --delete sync of ql-assets -> the host's
-#    shared pool dir) — cheap and idempotent, and safe to run even though it
-#    isn't scoped to exactly the files the operator ticked.
-#  - instance-selected plugins: a plain local file copy from the ql-assets
-#    pool into configs/{host}/{instance}/scripts/ — no SSH involved, since
+#    playbook (full rsync --archive --delete sync of the merged pool, built-in
+#    tier plus operator tier, -> the host's shared pool dir) — cheap and
+#    idempotent, and safe to run even though it isn't scoped to exactly the
+#    files the operator ticked.
+#  - instance-selected plugins: a plain local file copy from the merged pool
+#    (see ui/plugin_pool.py) into configs/{host}/{instance}/scripts/ — no SSH involved, since
 #    that directory lives on the qlsm controller itself. The next restart
 #    (queued here if the operator asked for one) picks it up via the
 #    existing "Sync instance-specific scripts" task, same as any other
@@ -24,37 +25,28 @@ from flask import current_app
 
 from ui.models import HostStatus, InstanceStatus
 from ui.database import get_host, update_host, update_instance
-from ui.runtime import host_runtime, runtime_extravars, runtime_paths
+from ui.plugin_pool import resolve_pool_file
+from ui.runtime import host_runtime, runtime_extravars
 from .ansible_runner import _run_host_ansible_playbook
 
 
 log = logging.getLogger(__name__)
 
 
-def _pool_dir_for_host(host):
-    """The ql-assets pool matching this host's runtime, e.g.
-    ql-assets/data/minqlx-plugins/. Resolved through runtime_paths()'s
-    asset_plugins_dir rather than a runtime == 'minqlx' check, so minqlx and
-    minqlxtended-patched (which share this pool) don't need special-casing,
-    and it keeps working once a third runtime shares it too."""
-    pool_name = runtime_paths(host_runtime(host))['asset_plugins_dir']
-    return os.path.abspath(os.path.join('ql-assets', 'data', pool_name))
-
-
 def _copy_selected_plugin_files(host, instance, filenames):
-    """Copies filenames from the ql-assets pool into this instance's
-    selected-scripts directory. Returns (applied, skipped) filename lists.
-    filenames are basenames only (os.path.basename applied defensively —
-    this list ultimately comes from a JSON request body)."""
-    pool_dir = _pool_dir_for_host(host)
+    """Copies filenames from the merged pool (operator copy wins) into this
+    instance's selected-scripts directory. Returns (applied, skipped)
+    filename lists. filenames are basenames only (os.path.basename applied
+    defensively — this list ultimately comes from a JSON request body)."""
+    runtime = host_runtime(host)
     dest_dir = os.path.abspath(os.path.join('configs', host.name, str(instance.id), 'scripts'))
     os.makedirs(dest_dir, exist_ok=True)
 
     applied, skipped = [], []
     for raw_name in filenames:
         name = os.path.basename(raw_name)
-        src = os.path.join(pool_dir, name)
-        if not name or not os.path.isfile(src):
+        src = resolve_pool_file(runtime, name) if name else None
+        if src is None:
             skipped.append(raw_name)
             continue
         shutil.copy2(src, os.path.join(dest_dir, name))

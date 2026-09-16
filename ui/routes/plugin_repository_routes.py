@@ -7,7 +7,7 @@ from flask_jwt_extended import jwt_required
 
 from ui import db
 from ui.models import PluginRepository
-from ui.plugin_pool import pool_dir as shared_pool_dir
+from ui.plugin_pool import resolve_pool_file
 from ui.plugin_repositories import (
     PLUGIN_FILE_MAX_SIZE,
     PluginRepositoryError,
@@ -309,8 +309,8 @@ def diff_plugin_repository_plugin(repo_id):
     if runtime is None:
         return jsonify({'error': {'message': 'No runtime declared for this plugin. Pick one for it first.'}}), 400
 
-    local_path = os.path.join(shared_pool_dir(runtime), filename)
-    if not os.path.isfile(local_path):
+    local_path = resolve_pool_file(runtime, filename)
+    if local_path is None:
         return jsonify({'error': {'message': f"{filename} is not in the local pool."}}), 404
     # The file can vanish between isfile() and the read (an overwrite download
     # in another tab, a pool sync) or be unreadable; both are "not in the pool"

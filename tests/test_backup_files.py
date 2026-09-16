@@ -4,13 +4,12 @@ from ui.task_logic.backup_files import backup_file_trees, walk_tree
 
 
 class TestBackupFileTrees:
-    def test_returns_seven_trees_in_configs_before_presets_order(self):
+    def test_returns_six_trees_in_configs_before_presets_order(self):
         trees = backup_file_trees()
         prefixes = [t[0] for t in trees]
         assert prefixes == [
             'ssh-keys', 'terraform-state', 'configs', 'presets',
-            'plugins/minqlx-plugins', 'plugins/minqlxtended-plugins',
-            'plugins/system-hooks',
+            'plugins/shared-plugins', 'plugins/system-hooks',
         ]
         assert prefixes.index('configs') < prefixes.index('presets')
 
@@ -47,14 +46,16 @@ class TestWalkTree:
         assert list(walk_tree(str(root))) == []
 
 
-def test_backup_includes_both_plugin_baselines():
-    """A restore onto a fresh machine must carry both runtimes' baselines, or a
-    minqlxtended host comes back with no plugins."""
+def test_backup_carries_the_operator_pool_but_not_the_image_baselines():
+    """Repository downloads for both runtimes live under one operator tree;
+    the built-in pools ship with the image and must never be restored over
+    a newer release's copies."""
     from ui.task_logic.backup_files import backup_file_trees
 
-    prefixes = [prefix for prefix, _, _ in backup_file_trees()]
-    assert 'plugins/minqlx-plugins' in prefixes
-    assert 'plugins/minqlxtended-plugins' in prefixes
+    trees = {prefix: root for prefix, root, _ in backup_file_trees()}
+    assert trees['plugins/shared-plugins'] == os.path.join('data', 'shared-plugins')
+    assert 'plugins/minqlx-plugins' not in trees
+    assert 'plugins/minqlxtended-plugins' not in trees
 
 
 def test_missing_minqlxtended_baseline_is_not_an_error(tmp_path):

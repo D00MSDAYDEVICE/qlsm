@@ -141,3 +141,32 @@ def test_apply_plugin_updates_host_not_found(app):
     with app.app_context():
         result = apply_plugin_updates_logic(99999, True, {}, [])
         assert result is False
+
+
+def test_apply_instance_selected_plugin_prefers_the_operator_copy(
+    app, mock_run_playbook, mock_get_current_job, mock_restart_instance_queue, temp_config_dir
+):
+    builtin = os.path.abspath(MINQLX_PLUGINS_POOL_DIR)
+    operator = os.path.abspath(os.path.join('data', 'shared-plugins', 'minqlx'))
+    os.makedirs(builtin); os.makedirs(operator)
+    with open(os.path.join(builtin, 'sample_plugin.py'), 'w') as f:
+        f.write('# bundled version\n')
+    with open(os.path.join(operator, 'sample_plugin.py'), 'w') as f:
+        f.write('# operator version\n')
+
+    with app.app_context():
+        from ui.database import db
+        from ui.models import QLInstance
+
+        host = create_host(name='test-host-operator-sel', provider='vultr', status=HostStatus.ACTIVE)
+        inst = QLInstance(name='inst-1', port=27960, hostname='server1', host_id=host.id, status=InstanceStatus.RUNNING)
+        db.session.add(inst)
+        db.session.commit()
+
+        result = apply_plugin_updates_logic(host.id, False, {inst.id: ['sample_plugin.py', 'missing.py']}, [])
+        assert result is True
+
+        dest = os.path.join('configs', host.name, str(inst.id), 'scripts', 'sample_plugin.py')
+        with open(dest) as f:
+            assert f.read() == '# operator version\n'
+        assert not os.path.exists(os.path.join('configs', host.name, str(inst.id), 'scripts', 'missing.py'))

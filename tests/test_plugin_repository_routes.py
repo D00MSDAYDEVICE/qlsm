@@ -590,8 +590,9 @@ def test_resolve_runtime(declared, picked, expected):
 def _patch_diff(monkeypatch, tmp_path, local=None, remote=b'print("repo")', error=None):
     """Point the pool at tmp_path/<runtime> and stub the repo fetch.
     `local` bytes are written as tmp_path/<runtime>/balance2.py."""
-    def fake_pool_dir(runtime):
-        return str(tmp_path / runtime)
+    def fake_resolve(runtime, filename):
+        path = tmp_path / runtime / filename
+        return str(path) if path.is_file() else None
 
     fetched = []
 
@@ -601,7 +602,7 @@ def _patch_diff(monkeypatch, tmp_path, local=None, remote=b'print("repo")', erro
             raise PluginRepositoryError(error)
         return remote
 
-    monkeypatch.setattr(plugin_repository_routes, 'shared_pool_dir', fake_pool_dir)
+    monkeypatch.setattr(plugin_repository_routes, 'resolve_pool_file', fake_resolve)
     monkeypatch.setattr(plugin_repository_routes, 'fetch_plugin_source', fake_fetch)
     if local is not None:
         (tmp_path / 'minqlx').mkdir(parents=True, exist_ok=True)

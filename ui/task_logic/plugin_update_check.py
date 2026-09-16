@@ -1,8 +1,9 @@
 # ui/task_logic/plugin_update_check.py
 #
 # "Check for Updates" — replaces the old blind "Update Plugins" button.
-# ql-assets/data/<runtime's pool>/ is the source of truth. Two independent
-# diffs against it:
+# The merged plugin pool for the host's runtime (built-in tier in
+# ql-assets/data/ overlaid by the operator tier in data/shared-plugins/, see
+# ui/plugin_pool.py) is the source of truth. Two independent diffs against it:
 #
 #  - host common pool (/home/ql/assets/common/minqlx-plugins/ on the VPS) —
 #    the shared baseline every instance backfills from on restart.
@@ -27,20 +28,16 @@
 import os
 
 from ui.update_checks import hash_local_tree, parse_sha256sum_output, diff_trees, PLUGIN_EXTENSIONS
+from ui.plugin_pool import pool_file_hashes
 from ui.runtime import host_runtime, runtime_paths
 from .ansible_runner import run_host_ansible_adhoc
 
 COMMON_ASSETS_REMOTE_DIR = "/home/ql/assets/common"
 
 
-def _pool_dir(host):
-    """The ql-assets pool matching this host's runtime, e.g.
-    ql-assets/data/minqlx-plugins/. Resolved through runtime_paths()'s
-    asset_plugins_dir rather than a runtime == 'minqlx' check, so minqlx and
-    minqlxtended-patched (which share this pool) don't need special-casing,
-    and it keeps working once a third runtime shares it too."""
-    pool_name = runtime_paths(host_runtime(host))['asset_plugins_dir']
-    return os.path.abspath(os.path.join('ql-assets', 'data', pool_name))
+def _pool_hashes(host):
+    """{filename: sha256} of the merged pool for this host's runtime."""
+    return pool_file_hashes(host_runtime(host), extensions=PLUGIN_EXTENSIONS)
 
 
 def _common_pool_remote_dir(host):
@@ -52,12 +49,12 @@ def _instance_scripts_dir(host_name, instance_id):
 
 
 def check_common_pool(host):
-    """Diffs ql-assets pool vs the host's shared common plugin pool
+    """Diffs the merged pool vs the host's shared common plugin pool
     (/home/ql/assets/common/{minqlx,minqlxtended}-plugins/, per the host's
     runtime). Returns (changes, error). error is set (changes is None) if
     the host was unreachable."""
     remote_dir = _common_pool_remote_dir(host)
-    source = hash_local_tree(_pool_dir(host), extensions=PLUGIN_EXTENSIONS)
+    source = _pool_hashes(host)
     success, stdout, stderr = run_host_ansible_adhoc(
         host,
         module_args=f"find {remote_dir} -maxdepth 1 -type f "
@@ -71,11 +68,11 @@ def check_common_pool(host):
 
 
 def check_instance_selected_plugins(host, instance):
-    """Diffs ql-assets pool vs this instance's own scripts snapshot
+    """Diffs the merged pool vs this instance's own scripts snapshot
     (configs/{host}/{instance}/scripts/) — purely local, no SSH needed.
     Only files present in both are compared, so every change is "modified"
     (see module docstring for why missing pool files aren't reported)."""
-    source = hash_local_tree(_pool_dir(host), extensions=PLUGIN_EXTENSIONS)
+    source = _pool_hashes(host)
     target = hash_local_tree(_instance_scripts_dir(host.name, instance.id), extensions=PLUGIN_EXTENSIONS)
     shared = source.keys() & target.keys()
     return diff_trees({n: source[n] for n in shared}, {n: target[n] for n in shared})

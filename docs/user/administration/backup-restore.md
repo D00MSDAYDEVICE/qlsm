@@ -1,6 +1,6 @@
 # Backup & Restore
 
-QLSM can export the full operational state of this instance — database, SSH keys, Terraform state, instance configs, presets, and plugin binaries — into a single downloadable file, and restore that file onto another QLSM instance. This is the supported way to migrate QLSM to a new host without losing track of the QLDS servers it manages.
+QLSM can export the full operational state of this instance — database, SSH keys, Terraform state, instance configs, presets, downloaded plugins, and hook binaries — into a single downloadable file, and restore that file onto another QLSM instance. This is the supported way to migrate QLSM to a new host without losing track of the QLDS servers it manages.
 
 Backup & Restore is found at **Settings → Backup & Restore**.
 
@@ -9,9 +9,9 @@ Backup & Restore is found at **Settings → Backup & Restore**.
 - The database: hosts, instances, users, preset metadata, your external API key, app settings (including a saved Vultr API key), and plugin binary descriptions.
 - SSH keys used to manage your hosts.
 - Terraform state for every provisioned host.
-- Instance configs, non-built-in presets, and plugin/hook binaries.
+- Instance configs, non-built-in presets, plugins downloaded from [plugin repositories](../operations/plugin-repositories.md), and hook binaries.
 
-Built-in presets are not included — they ship with QLSM itself and are restored from the Docker image on the new host.
+Built-in presets and QLSM's built-in plugins are not included — they ship with QLSM itself and are restored from the Docker image on the new host.
 
 `REDIS_PASSWORD` and `SECRET_KEY` are intentionally **not** included. Each QLSM host generates its own, and a mismatch after restore only means you'll need to sign in again — it doesn't affect any data.
 

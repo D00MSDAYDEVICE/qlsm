@@ -111,3 +111,34 @@ def test_check_host_updates_aggregates_instances(mock_adhoc, app, temp_config_di
     assert len(result["instances"]) == 1
     assert result["instances"][0]["id"] == inst.id
     assert result["instances"][0]["selected_plugin_changes"] == []
+
+
+@patch('ui.task_logic.plugin_update_check.run_host_ansible_adhoc')
+def test_check_common_pool_uses_the_operator_copy_over_the_built_in(mock_adhoc, app, temp_config_dir):
+    """A repo download that shadows a bundled plugin, or adds a new one, is
+    what the host must be compared against -- workers read the same data/
+    mount the web process wrote to."""
+    builtin = os.path.abspath(MINQLX_PLUGINS_POOL_DIR)
+    operator = os.path.abspath(os.path.join('data', 'shared-plugins', 'minqlx'))
+    os.makedirs(builtin); os.makedirs(operator)
+    with open(os.path.join(builtin, 'balance.py'), 'w') as f:
+        f.write('bundled')
+    with open(os.path.join(operator, 'balance.py'), 'w') as f:
+        f.write('operator')
+    with open(os.path.join(operator, 'backfire.py'), 'w') as f:
+        f.write('downloaded')
+
+    from ui.update_checks import hash_file
+    mock_adhoc.return_value = (
+        True,
+        f"{hash_file(os.path.join(builtin, 'balance.py'))}  /home/ql/assets/common/minqlx-plugins/balance.py\n",
+        "",
+    )
+
+    with app.app_context():
+        host = create_host(name='check-pool-operator', provider='vultr', status=HostStatus.ACTIVE)
+        changes, error = check_common_pool(host)
+
+    assert error is None
+    names = {c["name"]: c["change"] for c in changes}
+    assert names == {"balance.py": "modified", "backfire.py": "added"}

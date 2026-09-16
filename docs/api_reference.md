@@ -97,8 +97,9 @@ enabling it installs `gdb` on the host.
 GET /api/hosts/<id>/plugin-updates
 ```
 
-Read-only diff of `ql-assets/data/<pool>/` (the pool is chosen from
-`runtime_paths(host.runtime)['asset_plugins_dir']`) against two targets. Only
+Read-only diff of the host runtime's merged plugin pool (the built-in tier
+`ql-assets/data/<pool>/` overlaid by the operator tier
+`data/shared-plugins/<runtime>/`, see `ui/plugin_pool.py`) against two targets. Only
 `.py` and `.ql-plugin.json` files at the top level of the pool are compared.
 
 - **Common pool:** the host's `/home/ql/assets/common/<pool>/`, hashed with
@@ -1201,7 +1202,7 @@ A failed write (SSH or Redis unreachable) appends a warning to the instance log;
 
 ## Plugin Repositories
 
-External sources of plugins, fetched over HTTP and downloaded into the shared plugin pool (`ql-assets/data/<runtime>-plugins/`). See `ui/plugin_repositories.py`.
+External sources of plugins, fetched over HTTP and downloaded into the operator tier of the shared plugin pool (`data/shared-plugins/<runtime>/`, a bind-mounted folder every container sees). A download never modifies the built-in tier in `ql-assets/`; with `overwrite: true` it writes an operator copy that shadows a bundled plugin of the same name. See `ui/plugin_repositories.py` and `ui/plugin_pool.py`.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
