@@ -10,6 +10,8 @@ from ui.plugin_repositories import (
     build_inline_manifest,
     download_plugin,
     fetch_manifest,
+    fetch_plugin_source,
+    is_safe_plugin_filename,
     version_risk,
 )
 
@@ -429,3 +431,36 @@ def test_resolve_manifest_source_leaves_a_plain_url_alone():
     fetch_url, _ = plugin_repositories.resolve_manifest_source(
         'https://example.com/plugins/', lambda url: [])
     assert fetch_url == 'https://example.com/plugins/'
+
+
+# --- is_safe_plugin_filename / fetch_plugin_source ---
+
+@pytest.mark.parametrize('name, expected', [
+    ('autokick.py', True),
+    ('my-plugin_2.py', True),
+    ('../autokick.py', False),
+    ('sub/autokick.py', False),
+    ('autokick.txt', False),
+    ('', False),
+    (None, False),
+])
+def test_is_safe_plugin_filename(name, expected):
+    assert is_safe_plugin_filename(name) is expected
+
+
+def test_fetch_plugin_source_fetches_the_file_under_the_base_url(monkeypatch):
+    calls = []
+
+    def fake_get(url, timeout):
+        calls.append(url)
+        return FakeResponse(200, b'print("repo")')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    assert fetch_plugin_source('https://example.com/repo/', 'demo.py') == b'print("repo")'
+    assert calls == ['https://example.com/repo/demo.py']
+
+
+def test_fetch_plugin_source_raises_on_http_error(monkeypatch):
+    monkeypatch.setattr(plugin_repositories.requests, 'get', lambda url, timeout: FakeResponse(404, b''))
+    with pytest.raises(PluginRepositoryError, match='HTTP 404'):
+        fetch_plugin_source('https://example.com/repo', 'demo.py')

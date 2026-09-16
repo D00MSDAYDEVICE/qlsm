@@ -48,6 +48,12 @@ FETCH_TIMEOUT_SECONDS = 10
 # separators, nothing but what a valid module name and this pool allow.
 _FILENAME_RE = re.compile(r'^[A-Za-z0-9_\-]+\.py$')
 
+
+def is_safe_plugin_filename(filename):
+    """A bare `<name>.py` -- no path separators, no dots besides the
+    extension. Anything else never reaches a pool path."""
+    return isinstance(filename, str) and bool(_FILENAME_RE.match(filename))
+
 # The part of a repo manifest entry that becomes the plugin's pool sidecar
 # (<plugin>.ql-plugin.json). Everything else on an entry (filename, runtime,
 # requires_qlsm_version) only matters for listing/downloading.
@@ -79,6 +85,12 @@ def _fetch(url, max_size):
     if len(content) > max_size:
         raise PluginRepositoryError(f"{url} is larger than the {max_size} byte limit")
     return content
+
+
+def fetch_plugin_source(base_url, filename):
+    """The raw bytes of <base_url>/<filename>, under the plugin size cap.
+    Shared by download and diff so both read exactly the same URL."""
+    return _fetch(base_url.rstrip('/') + '/' + filename, PLUGIN_FILE_MAX_SIZE)
 
 
 # GitHub's repository page serves HTML, not files, so a pasted repo URL has to
@@ -279,7 +291,7 @@ def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifes
     breaks the manifest.json sha256 baseline. The caller (the route) is the
     one that turns this into an operator-facing confirm-and-retry.
     """
-    if not _FILENAME_RE.match(filename):
+    if not is_safe_plugin_filename(filename):
         raise PluginRepositoryError(f"Refusing to download unsafe filename: {filename!r}")
 
     pool_dir = shared_pool_dir(runtime)
@@ -290,7 +302,7 @@ def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifes
             f"{filename} already exists in the local pool.", code='exists',
         )
 
-    source = _fetch(base_url.rstrip('/') + '/' + filename, PLUGIN_FILE_MAX_SIZE)
+    source = fetch_plugin_source(base_url, filename)
     with open(dest_path, 'wb') as f:
         f.write(source)
 
