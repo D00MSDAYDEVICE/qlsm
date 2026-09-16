@@ -177,7 +177,7 @@ def test_sync_reports_fetch_failure(client, app, monkeypatch):
 
     _patch_fetch(monkeypatch, error='unreachable')
     response = client.post(f'/api/plugin-repositories/{repo_id}/sync', headers=headers)
-    assert response.status_code == 502
+    assert response.status_code == 422
     assert response.get_json()['error']['message'] == 'unreachable'
 
 
@@ -279,7 +279,7 @@ def test_download_requires_a_runtime_when_manifest_has_none(client, app, monkeyp
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
         json={'filenames': ['no_runtime.py']},
     )
-    assert response.status_code == 502
+    assert response.status_code == 422
     assert response.get_json()['downloaded'] == []
     assert response.get_json()['errors'][0]['filename'] == 'no_runtime.py'
 
@@ -378,7 +378,7 @@ def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, mo
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
         json={'filenames': ['balance2.py']},
     )
-    assert blocked.status_code == 502
+    assert blocked.status_code == 409
     assert blocked.get_json()['errors'][0]['code'] == 'exists'
 
     retried = client.post(
@@ -387,6 +387,36 @@ def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, mo
     )
     assert retried.status_code == 200
     assert retried.get_json()['downloaded'] == ['balance2.py']
+
+
+def test_download_mixed_exists_and_other_failure_returns_422(client, app, monkeypatch):
+    """409 is only for "everything already exists": any other failure in the
+    batch has no overwrite fix, so the whole response is a plain 422."""
+    _patch_fetch(monkeypatch, error='offline')
+    make_user(app, 'dlmixed', 'password123')
+    headers = auth_headers(app, 'dlmixed')
+    with app.app_context():
+        repo = _seeded_repo('Repo M', 'https://example.com/m', plugins=[
+            {'filename': 'dup.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None},
+            {'filename': 'bad.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None},
+        ])
+        repo_id = repo.id
+
+    def fake_download(base_url, filename, runtime, overwrite=False, inline_manifest=None):
+        if filename == 'dup.py':
+            raise PluginRepositoryError('dup.py already exists in the local pool.', code='exists')
+        raise PluginRepositoryError('download failed')
+
+    monkeypatch.setattr(plugin_repository_routes, 'download_plugin', fake_download)
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['dup.py', 'bad.py']},
+    )
+    assert response.status_code == 422
+    codes = {e['filename']: e.get('code') for e in response.get_json()['errors']}
+    assert codes == {'dup.py': 'exists', 'bad.py': None}
 
 
 def test_download_uses_freshly_fetched_entry_for_inline_manifest(client, app, monkeypatch):

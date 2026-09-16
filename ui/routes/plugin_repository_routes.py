@@ -152,8 +152,10 @@ def sync_plugin_repository(repo_id):
         current_app.logger.error(f"Error saving sync result for repository {repo_id}: {e}")
         return jsonify({'error': {'message': 'Failed to save sync result.'}}), 500
 
+    # Never 502/504 here or below: Cloudflare replaces those bodies with its
+    # own error page, so the operator would never see why a fetch failed.
     if not ok:
-        return jsonify({'error': {'message': error}, 'data': repo.to_dict()}), 502
+        return jsonify({'error': {'message': error}, 'data': repo.to_dict()}), 422
     return jsonify({'data': repo.to_dict()}), 200
 
 
@@ -256,5 +258,10 @@ def download_plugin_repository_plugins(repo_id):
             f"into the local pool (overwrite={overwrite}): {', '.join(downloaded)}"
         )
 
-    status = 200 if downloaded and not errors else (207 if downloaded else 502)
+    if downloaded:
+        status = 207 if errors else 200
+    elif all(e.get('code') == 'exists' for e in errors):
+        status = 409  # the UI turns this body into an overwrite prompt
+    else:
+        status = 422
     return jsonify({'downloaded': downloaded, 'errors': errors}), status

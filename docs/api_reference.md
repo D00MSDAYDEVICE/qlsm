@@ -1213,7 +1213,7 @@ External sources of plugins, fetched over HTTP and downloaded into the shared pl
 
 - A `github.com` repository URL is resolved to its `raw.githubusercontent.com` base on add (trying `main`, then `master`, unless the URL names a branch). `url` in responses is what the operator typed; `fetch_url` is what QLSM fetches.
 - Names are unique ignoring case, and a URL cannot be added twice in either form.
-- Download responses are `{downloaded: [...], errors: [{filename, error, code}]}` with 200 (all fine), 207 (partial) or 502 (none). `code: "exists"` means the pool already has that filename.
+- Download responses are `{downloaded: [...], errors: [{filename, error, code}]}` with 200 (all fine), 207 (partial), 409 (none, every file already exists) or 422 (none, other failures). A failed sync returns 422. Neither route uses 502, because Cloudflare replaces 502 bodies with its own error page. `code: "exists"` means the pool already has that filename.
 - A `qlsm-plugins.json` entry may carry `cvars`/`commands` (the `.ql-plugin.json` shape). Download re-fetches the manifest (falling back to the last-synced list) and writes the entry's `label`/`description`/`cvars`/`commands` as the pool's `<plugin>.ql-plugin.json`. A separate `<plugin>.ql-plugin.json` in the repo takes precedence; an inline block over 16 KB is skipped.
 
 ## Cvar Catalog
