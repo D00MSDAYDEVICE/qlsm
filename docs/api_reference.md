@@ -1179,12 +1179,14 @@ Redis — minqlx's own permission database on the running server — is the only
 {
   "data": {
     "admins": [{"steam_id64": "76561198012345678", "level": 5}],
+    "names": {"76561198012345678": "^1Vex"},
     "error": null
   }
 }
 ```
 
 - `admins`: every SteamID with a level from 1 to 5 in the instance's Redis database, sorted by SteamID, read over one bounded SSH round trip. `null` when the server could not be read.
+- `names`: each listed admin's last in-game name as minqlx stored it in Redis (`minqlx:players:<steamid>:current_name`, else the newest entry of the `minqlx:players:<steamid>` name list), Quake color codes included. SteamIDs with no recorded name are absent. Always an object; `{}` when the server could not be read.
 - `error`: why `admins` is `null` (unreachable host, no Redis, etc.), or `null` on a successful read.
 
 ### Admin Fields On Other Endpoints

@@ -6,6 +6,9 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.34.2` | 2026-09-14 | [#213](https://github.com/dngrtech/qlsm/pull/213) | Count only admins shown in a level card in the **Server Admins** badge. |
+| `v1.34.1` | 2026-09-14 | [#212](https://github.com/dngrtech/qlsm/pull/212) | Group admins by level in the **Owner & Admins** tab. |
+| `v1.34.0` | 2026-09-14 | [#211](https://github.com/dngrtech/qlsm/pull/211) | Show each admin's in-game name in the **Owner & Admins** tab and prefill it in **Add to operators**. |
 | `v1.33.0` | 2026-09-13 | [#203](https://github.com/dngrtech/qlsm/pull/203) | Add a **Check for Updates** host action that shows which plugin files are out of date and updates the ones you pick. |
 | `v1.32.1` | 2026-09-13 | [#210](https://github.com/dngrtech/qlsm/pull/210) | Update minqlxtended to v1.1.0 for new and rebuilt minqlxtended hosts. |
 | `v1.32.0` | 2026-09-12 | [#209](https://github.com/dngrtech/qlsm/pull/209) | Make Redis the only source of truth for minqlx admin levels, and remove **Adopt** from the **Owner & Admins** tab. |

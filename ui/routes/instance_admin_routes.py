@@ -17,5 +17,5 @@ def get_instance_admins(instance_id):
     if instance is None:
         return jsonify({"error": {"message": f"Instance {instance_id} not found."}}), 404
 
-    admins, error = read_live_admins(instance)
-    return jsonify({"data": {"admins": admins, "error": error}}), 200
+    admins, names, error = read_live_admins(instance)
+    return jsonify({"data": {"admins": admins, "names": names or {}, "error": error}}), 200

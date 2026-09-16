@@ -49,6 +49,10 @@ the preset add and edit pages they appear as a panel above the config fields.
   **Add**. Admins are picked from the operator directory above, so granting a
   raw SteamID means adding that person there first.
 
+The admin list is grouped into one card per level, from **Level 5** down to
+**Level 1**; levels with nobody in them are hidden. The count next to
+**Server Admins** is the total across all levels.
+
 Higher levels unlock more minqlx admin commands. Level **5** is the highest
 and includes `!setperm`, which lets that admin grant permissions to other
 players, so only give 5 to people you trust with that.
@@ -64,12 +68,15 @@ QLSM reads the admin list from the server as soon as **Edit Configuration**
 opens, so the tab is already filled when you switch to it. **Save Preset**
 includes the admin list even if you never opened the tab.
 
-An admin whose SteamID is not in the operator directory shows as a bare
-SteamID with an **Add to operators** button. It opens the same Add Operator
-dialog as the Operators page, on top of the configuration window, with the
-SteamID and current level already filled in. Enter a name and click **Add
-Operator**; the row then shows that name. Your unsaved configuration edits
-are not affected.
+An admin whose SteamID is not in the operator directory shows the last name
+they used on that server, in its in-game colors, next to their SteamID. The
+name comes from minqlx's player records, so someone who has never joined the
+server shows as a bare SteamID. Either way the row has an **Add to operators**
+button. It opens the same Add Operator dialog as the Operators page, on top
+of the configuration window, with the SteamID, current level and in-game name
+(without color codes) already filled in. Adjust the name if you like and click
+**Add Operator**; the row then shows that name. Your unsaved configuration
+edits are not affected.
 
 ## What Happens When You Save
 
