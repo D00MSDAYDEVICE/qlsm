@@ -123,8 +123,10 @@ const mergeColors = {
   dark: {
     removedLine: 'rgba(255, 51, 102, 0.12)',
     removedText: 'rgba(255, 51, 102, 0.35)',
+    removedTextColor: '#ffd7e0',
     addedLine: 'rgba(0, 255, 157, 0.10)',
-    addedText: 'rgba(0, 255, 157, 0.30)',
+    addedText: 'rgba(0, 255, 157, 0.22)',
+    addedTextColor: '#d6ffef',
     gutterRemoved: '#FF3366',
     gutterAdded: '#00FF9D',
     collapsed: 'var(--surface-elevated)',
@@ -132,8 +134,10 @@ const mergeColors = {
   light: {
     removedLine: 'rgba(220, 38, 38, 0.10)',
     removedText: 'rgba(220, 38, 38, 0.28)',
+    removedTextColor: '#7a0d0d',
     addedLine: 'rgba(13, 150, 104, 0.10)',
-    addedText: 'rgba(13, 150, 104, 0.28)',
+    addedText: 'rgba(13, 150, 104, 0.20)',
+    addedTextColor: '#04422c',
     gutterRemoved: '#DC2626',
     gutterAdded: '#0D9668',
     collapsed: '#eef1f5',
@@ -141,10 +145,12 @@ const mergeColors = {
 };
 
 const mergeTheme = (c, dark) => EditorView.theme({
-  '&.cm-merge-a .cm-changedLine': { backgroundColor: `${c.removedLine} !important` },
-  '&.cm-merge-a .cm-changedText': { backgroundColor: c.removedText, textDecoration: 'none' },
-  '&.cm-merge-b .cm-changedLine': { backgroundColor: `${c.addedLine} !important` },
-  '&.cm-merge-b .cm-changedText': { backgroundColor: c.addedText, textDecoration: 'none' },
+  '&.cm-merge-a .cm-changedLine': { backgroundColor: `${c.removedLine} !important`, color: `${c.removedTextColor} !important` },
+  '&.cm-merge-a .cm-changedLine .custom-line-comment': { color: `${c.removedTextColor} !important`, opacity: '0.75' },
+  '&.cm-merge-a .cm-changedText': { backgroundColor: c.removedText, color: `${c.removedTextColor} !important`, textDecoration: 'none' },
+  '&.cm-merge-b .cm-changedLine': { backgroundColor: `${c.addedLine} !important`, color: `${c.addedTextColor} !important` },
+  '&.cm-merge-b .cm-changedLine .custom-line-comment': { color: `${c.addedTextColor} !important`, opacity: '0.75' },
+  '&.cm-merge-b .cm-changedText': { backgroundColor: c.addedText, color: `${c.addedTextColor} !important`, textDecoration: 'none' },
   '&.cm-merge-a .cm-changedLineGutter': { backgroundColor: c.gutterRemoved },
   '&.cm-merge-b .cm-changedLineGutter': { backgroundColor: c.gutterAdded },
   // @codemirror/merge's base theme makes each pane document-tall, and the
