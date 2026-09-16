@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  PackagePlus, Trash2, RefreshCw, AlertCircle, AlertTriangle, Loader2, Download, ChevronDown, ChevronRight,
+  PackagePlus, Trash2, RefreshCw, AlertCircle, AlertTriangle, Loader2, Download, ChevronRight,
 } from 'lucide-react';
 import {
   getPluginRepositories,
@@ -13,7 +13,7 @@ import { useNotification } from '../components/NotificationProvider';
 import ConfirmationModal from '../components/ConfirmationModal';
 import AddPluginRepositoryModal from '../components/pluginRepositories/AddPluginRepositoryModal';
 import { formatDateTime } from '../utils/uiUtils';
-import { RUNTIME_OPTIONS } from '../constants/runtimes';
+import RuntimePicker from '../components/pluginRepositories/RuntimePicker';
 
 // One repository's plugin list: expand/collapse, per-plugin checkboxes, and a
 // per-plugin runtime pick for selected entries that declare no runtime.
@@ -112,7 +112,9 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
           onClick={() => setExpanded(v => !v)}
           className="flex items-center gap-2 min-w-0 text-left"
         >
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <span className={`expand-icon${expanded ? ' is-expanded' : ''}`}>
+            <ChevronRight size={16} />
+          </span>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="users-td-username">{repo.name}</span>
@@ -151,7 +153,8 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
         </div>
       </div>
 
-      {expanded && (
+      <div className={`collapsible-section${expanded ? ' is-expanded' : ''}`} inert={!expanded}>
+        <div className="collapsible-inner">
         <div className="px-4 pb-4 border-t border-[var(--surface-border)]">
           {repo.plugins.length === 0 ? (
             <p className="text-sm text-[var(--text-muted)] pt-3">
@@ -164,7 +167,7 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
                   <tr>
                     <th className="users-th" style={{ width: '2rem' }} />
                     <th className="users-th">Plugin</th>
-                    <th className="users-th">Runtime</th>
+                    <th className="users-th w-40">Runtime</th>
                     <th className="users-th">Notes</th>
                   </tr>
                 </thead>
@@ -188,25 +191,12 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
                       <td className="users-td">
                         {plugin.runtime ? (
                           <span className="font-mono text-xs">{plugin.runtime}</span>
-                        ) : checked.has(plugin.filename) ? (
-                          <select
-                            value={pickedRuntimes[plugin.filename] || ''}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setPickedRuntimes(prev => ({ ...prev, [plugin.filename]: value }));
-                            }}
-                            aria-label={`Runtime for ${plugin.filename}`}
-                            className="input-base text-xs py-1"
-                          >
-                            <option value="">Pick runtime...</option>
-                            {RUNTIME_OPTIONS.map((opt) => (
-                              <option key={opt.id} value={opt.id}>{opt.name}</option>
-                            ))}
-                          </select>
                         ) : (
-                          <span className="text-xs text-[var(--text-muted)]" title="This plugin doesn't declare a runtime. Select it to pick one.">
-                            not declared
-                          </span>
+                          <RuntimePicker
+                            value={pickedRuntimes[plugin.filename]}
+                            onChange={(value) => setPickedRuntimes(prev => ({ ...prev, [plugin.filename]: value }))}
+                            ariaLabel={`Runtime for ${plugin.filename}`}
+                          />
                         )}
                       </td>
                       <td className="users-td">
@@ -247,7 +237,8 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
             </>
           )}
         </div>
-      )}
+        </div>
+      </div>
 
       {overwriteConfirm && (
         <ConfirmationModal
