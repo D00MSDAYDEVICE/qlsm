@@ -243,6 +243,7 @@ def test_delete_repository(client, app, monkeypatch):
 # --- POST /api/plugin-repositories/<id>/download ---
 
 def test_download_uses_the_manifests_own_runtime(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
     make_user(app, 'dlruntime', 'password123')
     headers = auth_headers(app, 'dlruntime')
     with app.app_context():
@@ -252,7 +253,7 @@ def test_download_uses_the_manifests_own_runtime(client, app, monkeypatch):
     calls = []
     monkeypatch.setattr(
         plugin_repository_routes, 'download_plugin',
-        lambda base_url, filename, runtime, overwrite=False: calls.append((base_url, filename, runtime)),
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None: calls.append((base_url, filename, runtime)),
     )
     response = client.post(
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
@@ -264,6 +265,7 @@ def test_download_uses_the_manifests_own_runtime(client, app, monkeypatch):
 
 
 def test_download_requires_a_runtime_when_manifest_has_none(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
     make_user(app, 'dlnoruntime', 'password123')
     headers = auth_headers(app, 'dlnoruntime')
     with app.app_context():
@@ -283,6 +285,7 @@ def test_download_requires_a_runtime_when_manifest_has_none(client, app, monkeyp
 
 
 def test_download_picked_runtime_does_not_override_declared_runtime(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
     make_user(app, 'dloverride', 'password123')
     headers = auth_headers(app, 'dloverride')
     with app.app_context():
@@ -299,7 +302,7 @@ def test_download_picked_runtime_does_not_override_declared_runtime(client, app,
     calls = []
     monkeypatch.setattr(
         plugin_repository_routes, 'download_plugin',
-        lambda base_url, filename, runtime, overwrite=False: calls.append((base_url, filename, runtime)),
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None: calls.append((base_url, filename, runtime)),
     )
     response = client.post(
         f'/api/plugin-repositories/{repo_id}/download', headers=headers,
@@ -330,6 +333,7 @@ def test_download_rejects_an_unknown_picked_runtime(client, app):
 
 
 def test_download_partial_failure_returns_207(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
     make_user(app, 'dlpartial', 'password123')
     headers = auth_headers(app, 'dlpartial')
     with app.app_context():
@@ -341,7 +345,7 @@ def test_download_partial_failure_returns_207(client, app, monkeypatch):
         ])
         repo_id = repo.id
 
-    def fake_download(base_url, filename, runtime, overwrite=False):
+    def fake_download(base_url, filename, runtime, overwrite=False, inline_manifest=None):
         if filename == 'bad.py':
             raise PluginRepositoryError('download failed')
 
@@ -357,13 +361,14 @@ def test_download_partial_failure_returns_207(client, app, monkeypatch):
 
 
 def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
     make_user(app, 'dloverwrite', 'password123')
     headers = auth_headers(app, 'dloverwrite')
     with app.app_context():
         repo = _seeded_repo('Repo I', 'https://example.com/i')
         repo_id = repo.id
 
-    def fake_download(base_url, filename, runtime, overwrite=False):
+    def fake_download(base_url, filename, runtime, overwrite=False, inline_manifest=None):
         if not overwrite:
             raise PluginRepositoryError(f'{filename} already exists in the local pool.', code='exists')
 
@@ -382,6 +387,121 @@ def test_download_surfaces_the_exists_code_and_overwrite_retries(client, app, mo
     )
     assert retried.status_code == 200
     assert retried.get_json()['downloaded'] == ['balance2.py']
+
+
+def test_download_uses_freshly_fetched_entry_for_inline_manifest(client, app, monkeypatch):
+    make_user(app, 'dlfresh', 'password123')
+    headers = auth_headers(app, 'dlfresh')
+    with app.app_context():
+        repo = _seeded_repo('Repo J', 'https://example.com/j')  # stored entry has no cvars
+        repo_id = repo.id
+
+    cvars = [{'cvar': 'qlx_balance', 'type': 'bool', 'default': True}]
+    _patch_fetch(monkeypatch, plugins=[
+        {'filename': 'balance2.py', 'label': 'Balance', 'description': None,
+         'runtime': 'minqlx', 'requires_qlsm_version': None, 'cvars': cvars},
+    ])
+    calls = []
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None:
+            calls.append((filename, runtime, inline_manifest)),
+    )
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py']},
+    )
+    assert response.status_code == 200
+    assert calls == [('balance2.py', 'minqlx', {'label': 'Balance', 'cvars': cvars})]
+
+
+def test_download_falls_back_to_stored_entries_when_fresh_fetch_fails(client, app, monkeypatch):
+    make_user(app, 'dlfallback', 'password123')
+    headers = auth_headers(app, 'dlfallback')
+    cvars = [{'cvar': 'qlx_stored', 'type': 'string', 'default': ''}]
+    with app.app_context():
+        repo = _seeded_repo('Repo K', 'https://example.com/k', plugins=[
+            {'filename': 'stored.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None, 'cvars': cvars},
+        ])
+        repo_id = repo.id
+
+    _patch_fetch(monkeypatch, error='unreachable')
+    calls = []
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None:
+            calls.append((filename, inline_manifest)),
+    )
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['stored.py']},
+    )
+    assert response.status_code == 200
+    assert calls == [('stored.py', {'cvars': cvars})]
+
+
+def test_download_uses_the_stored_entry_when_the_fresh_manifest_lacks_the_filename(client, app, monkeypatch):
+    make_user(app, 'dlmissing', 'password123')
+    headers = auth_headers(app, 'dlmissing')
+    cvars = [{'cvar': 'qlx_stored', 'type': 'string', 'default': ''}]
+    with app.app_context():
+        repo = _seeded_repo('Repo L', 'https://example.com/l', plugins=[
+            {'filename': 'stored.py', 'label': None, 'description': None,
+             'runtime': 'minqlx', 'requires_qlsm_version': None, 'cvars': cvars},
+        ])
+        repo_id = repo.id
+
+    # The author dropped stored.py from qlsm-plugins.json since the last sync.
+    # The operator still clicked the row the UI showed, so it downloads with
+    # the stored runtime + metadata; if the .py is really gone download_plugin
+    # reports the real HTTP error, not "No runtime declared".
+    _patch_fetch(monkeypatch, plugins=[
+        {'filename': 'other.py', 'label': None, 'description': None,
+         'runtime': 'minqlxtended', 'requires_qlsm_version': None},
+    ])
+    calls = []
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None:
+            calls.append((filename, runtime, inline_manifest)),
+    )
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['stored.py']},
+    )
+    assert response.status_code == 200
+    assert response.get_json()['errors'] == []
+    assert calls == [('stored.py', 'minqlx', {'cvars': cvars})]
+
+
+def test_download_keeps_the_stored_runtime_when_the_fresh_entry_declares_another(client, app, monkeypatch):
+    make_user(app, 'dlkeepruntime', 'password123')
+    headers = auth_headers(app, 'dlkeepruntime')
+    with app.app_context():
+        repo = _seeded_repo('Repo M', 'https://example.com/m')  # balance2.py, runtime minqlx
+        repo_id = repo.id
+
+    # Fresh manifest moved balance2.py to another runtime and added cvars.
+    # The pool is still chosen by what the UI listed (stored: minqlx); only
+    # the metadata comes from the fresh entry.
+    cvars = [{'cvar': 'qlx_balance', 'type': 'bool', 'default': True}]
+    _patch_fetch(monkeypatch, plugins=[
+        {'filename': 'balance2.py', 'label': 'Balance', 'description': None,
+         'runtime': 'minqlxtended', 'requires_qlsm_version': None, 'cvars': cvars},
+    ])
+    calls = []
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None:
+            calls.append((filename, runtime, inline_manifest)),
+    )
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py']},
+    )
+    assert response.status_code == 200
+    assert calls == [('balance2.py', 'minqlx', {'label': 'Balance', 'cvars': cvars})]
 
 
 def test_create_repository_stores_the_raw_url_and_keeps_what_was_typed(client, app, monkeypatch):
