@@ -539,3 +539,40 @@ def test_download_plugin_matching_built_in_is_left_alone(tmp_path, monkeypatch):
     )
     download_plugin('https://example.com/repo', 'balance.py', 'minqlx')
     assert not (tmp_path / 'data' / 'shared-plugins' / 'minqlx' / 'balance.py').exists()
+
+
+def test_download_plugin_matching_built_in_writes_no_orphan_sidecar(tmp_path, monkeypatch):
+    """The repo ships a sidecar for a plugin whose code matches the bundled
+    copy. Nothing may land in the operator tier: an orphan sidecar there
+    would shadow the built-in one and hide every later release's update."""
+    monkeypatch.chdir(tmp_path)
+    builtin = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    builtin.mkdir(parents=True)
+    (builtin / 'balance.py').write_bytes(b'print("same")\n')
+    (builtin / 'balance.ql-plugin.json').write_text('{"label": "Bundled"}')
+
+    def fake_get(url, timeout):
+        if url.endswith('.ql-plugin.json'):
+            return FakeResponse(200, b'{"label": "Repo"}')
+        return FakeResponse(200, b'print("same")\r\n')
+
+    monkeypatch.setattr(plugin_repositories.requests, 'get', fake_get)
+    download_plugin('https://example.com/repo', 'balance.py', 'minqlx',
+                    inline_manifest={'label': 'Inline'})
+
+    assert not (tmp_path / 'data' / 'shared-plugins').exists()
+    assert (builtin / 'balance.ql-plugin.json').read_text() == '{"label": "Bundled"}'
+
+
+def test_download_plugin_refused_download_creates_no_operator_dir(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    builtin = tmp_path / 'ql-assets' / 'data' / 'minqlx-plugins'
+    builtin.mkdir(parents=True)
+    (builtin / 'balance.py').write_text('# bundled copy')
+    monkeypatch.setattr(
+        plugin_repositories.requests, 'get',
+        lambda url, timeout: FakeResponse(200, b'print("repo copy")'),
+    )
+    with pytest.raises(PluginRepositoryError):
+        download_plugin('https://example.com/repo', 'balance.py', 'minqlx')
+    assert not (tmp_path / 'data' / 'shared-plugins').exists()

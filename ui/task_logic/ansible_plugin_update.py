@@ -10,8 +10,9 @@
 #    idempotent, and safe to run even though it isn't scoped to exactly the
 #    files the operator ticked.
 #  - instance-selected plugins: a plain local file copy from the merged pool
-#    (see ui/plugin_pool.py) into configs/{host}/{instance}/scripts/ — no SSH involved, since
-#    that directory lives on the qlsm controller itself. The next restart
+#    (see ui/plugin_pool.py) into configs/{host}/{instance}/scripts/ — no
+#    SSH involved, since that directory lives on the qlsm controller itself.
+#    The next restart
 #    (queued here if the operator asked for one) picks it up via the
 #    existing "Sync instance-specific scripts" task, same as any other
 #    config change.

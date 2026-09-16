@@ -308,22 +308,29 @@ def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifes
         raise PluginRepositoryError(f"Refusing to download unsafe filename: {filename!r}")
 
     pool_dir = operator_pool_dir(runtime)
-    os.makedirs(pool_dir, exist_ok=True)
     dest_path = os.path.join(pool_dir, filename)
 
     source = fetch_plugin_source(base_url, filename)
     existing_path = resolve_pool_file(runtime, filename)
     if existing_path and not overwrite:
         # Same code already in the pool (ignoring CRLF/LF) is "up to date",
-        # not a collision: keep the local copy as is and only sync the
-        # sidecar below. Otherwise the operator decides via the prompt.
+        # not a collision: keep the local copy as is. Otherwise the operator
+        # decides via the prompt.
         with open(existing_path, 'rb') as f:
             existing = f.read()
         if _normalize_eol(existing) != _normalize_eol(source):
             raise PluginRepositoryError(
                 f"{filename} already exists in the local pool.", code='exists',
             )
+        if existing_path != dest_path:
+            # The match is the built-in copy. Writing a sidecar next to a
+            # .py that isn't there would leave an orphan in the operator
+            # tier that shadows the bundled sidecar for every later release.
+            # An earlier operator download, by contrast, still gets its
+            # sidecar synced below.
+            return
     else:
+        os.makedirs(pool_dir, exist_ok=True)
         with open(dest_path, 'wb') as f:
             f.write(source)
 
