@@ -1,17 +1,22 @@
 import datetime
 import json
+import os
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required
 
 from ui import db
 from ui.models import PluginRepository
+from ui.plugin_pool import pool_dir as shared_pool_dir
 from ui.plugin_repositories import (
+    PLUGIN_FILE_MAX_SIZE,
     PluginRepositoryError,
     build_inline_manifest,
     download_plugin,
     fetch_manifest,
+    fetch_plugin_source,
     github_raw_bases,
+    is_safe_plugin_filename,
     resolve_manifest_source,
     version_risk,
 )
@@ -277,3 +282,57 @@ def download_plugin_repository_plugins(repo_id):
     else:
         status = 422
     return jsonify({'downloaded': downloaded, 'errors': errors}), status
+
+
+@plugin_repository_api_bp.route('/<int:repo_id>/diff', methods=['GET'])
+@jwt_required()
+def diff_plugin_repository_plugin(repo_id):
+    """Local pool copy vs. repository copy of one plugin, for the overwrite
+    prompt's Diff window. Read-only. Never 502: Cloudflare replaces those
+    bodies with its own page, hiding the reason."""
+    repo = db.session.get(PluginRepository, repo_id)
+    if not repo:
+        return jsonify({'error': {'message': 'Repository not found.'}}), 404
+
+    filename = (request.args.get('filename') or '').strip()
+    if not is_safe_plugin_filename(filename):
+        return jsonify({'error': {'message': f"Refusing to diff unsafe filename: {filename!r}"}}), 400
+
+    # Same check and message as the download route, so a malformed pick is
+    # reported as unknown rather than as "no runtime declared".
+    picked = request.args.get('runtime') or None
+    if picked is not None and not is_valid_runtime(picked):
+        return jsonify({'error': {'message': f"Unknown runtime: {picked!r}"}}), 400
+
+    entry = next((p for p in repo.to_dict()['plugins'] if p['filename'] == filename), None)
+    runtime = _resolve_runtime(entry, picked)
+    if runtime is None:
+        return jsonify({'error': {'message': 'No runtime declared for this plugin. Pick one for it first.'}}), 400
+
+    local_path = os.path.join(shared_pool_dir(runtime), filename)
+    if not os.path.isfile(local_path):
+        return jsonify({'error': {'message': f"{filename} is not in the local pool."}}), 404
+    # The file can vanish between isfile() and the read (an overwrite download
+    # in another tab, a pool sync) or be unreadable; both are "not in the pool"
+    # to the caller, never a 500.
+    try:
+        if os.path.getsize(local_path) > PLUGIN_FILE_MAX_SIZE:
+            return jsonify({'error': {'message': (
+                f"{filename} in the local pool is larger than the {PLUGIN_FILE_MAX_SIZE} byte limit"
+            )}}), 422
+        with open(local_path, 'rb') as f:
+            local = f.read()
+    except OSError:
+        return jsonify({'error': {'message': f"{filename} is not in the local pool."}}), 404
+
+    try:
+        remote = fetch_plugin_source(repo.url, filename)
+    except PluginRepositoryError as e:
+        return jsonify({'error': {'message': str(e)}}), 422
+
+    return jsonify({'data': {
+        'filename': filename,
+        'runtime': runtime,
+        'local': local.decode('utf-8', errors='replace'),
+        'remote': remote.decode('utf-8', errors='replace'),
+    }}), 200
