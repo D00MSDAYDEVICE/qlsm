@@ -1,6 +1,7 @@
 """External plugin repositories: fetch a `qlsm-plugins.json` manifest over
 plain HTTP from an operator-supplied repo URL, and download individual plugin
-files from it into the local pool (ql-assets/data/<runtime>-plugins/).
+files from it into the operator tier of the local pool
+(data/shared-plugins/<runtime>/, see ui/plugin_pool.py).
 
 This is deliberately separate from `.ql-plugin.json` (plugin_manifest.py,
 per-plugin display/edit metadata for a file already in the pool) and from the
@@ -34,7 +35,7 @@ import re
 import requests
 
 from ui.plugin_manifest import PLUGIN_MANIFEST_MAX_SIZE
-from ui.plugin_pool import pool_dir as shared_pool_dir
+from ui.plugin_pool import operator_pool_dir, resolve_pool_file
 from ui.runtime import is_valid_runtime
 
 logger = logging.getLogger(__name__)
@@ -291,32 +292,45 @@ def download_plugin(base_url, filename, runtime, overwrite=False, inline_manifes
     PluginRepositoryError if the plugin source itself can't be fetched; a
     missing, malformed or non-object separate sidecar is not an error.
 
-    Refuses to replace a file already in the pool unless `overwrite` is set
-    (a copy that matches apart from line endings is left alone instead):
-    a repo plugin sharing a name with a bundled one (e.g. balance.py) would
-    otherwise silently replace it, and that copy then ships to every host and
-    breaks the manifest.json sha256 baseline. The caller (the route) is the
-    one that turns this into an operator-facing confirm-and-retry.
+    Writes always land in the operator tier (data/shared-plugins/<runtime>/);
+    the built-in tier inside the image is never modified. Refuses to shadow a
+    file already in the merged pool -- an earlier download, or a bundled
+    plugin such as balance.py -- unless `overwrite` is set (a copy that
+    matches apart from line endings is left alone instead): the operator copy
+    then wins over the bundled one on every host and breaks the manifest.json
+    sha256 baseline, so it has to be a deliberate choice. The caller (the
+    route) is the one that turns this into an operator-facing
+    confirm-and-retry. Sidecar handling is scoped to the operator tier: a
+    bundled plugin's own sidecar stays where it is, and read_plugin_manifest()
+    still falls back to it when the download brings none of its own.
     """
     if not is_safe_plugin_filename(filename):
         raise PluginRepositoryError(f"Refusing to download unsafe filename: {filename!r}")
 
-    pool_dir = shared_pool_dir(runtime)
-    os.makedirs(pool_dir, exist_ok=True)
+    pool_dir = operator_pool_dir(runtime)
     dest_path = os.path.join(pool_dir, filename)
 
     source = fetch_plugin_source(base_url, filename)
-    if os.path.exists(dest_path) and not overwrite:
+    existing_path = resolve_pool_file(runtime, filename)
+    if existing_path and not overwrite:
         # Same code already in the pool (ignoring CRLF/LF) is "up to date",
-        # not a collision: keep the local copy as is and only sync the
-        # sidecar below. Otherwise the operator decides via the prompt.
-        with open(dest_path, 'rb') as f:
+        # not a collision: keep the local copy as is. Otherwise the operator
+        # decides via the prompt.
+        with open(existing_path, 'rb') as f:
             existing = f.read()
         if _normalize_eol(existing) != _normalize_eol(source):
             raise PluginRepositoryError(
                 f"{filename} already exists in the local pool.", code='exists',
             )
+        if existing_path != dest_path:
+            # The match is the built-in copy. Writing a sidecar next to a
+            # .py that isn't there would leave an orphan in the operator
+            # tier that shadows the bundled sidecar for every later release.
+            # An earlier operator download, by contrast, still gets its
+            # sidecar synced below.
+            return
     else:
+        os.makedirs(pool_dir, exist_ok=True)
         with open(dest_path, 'wb') as f:
             f.write(source)
 

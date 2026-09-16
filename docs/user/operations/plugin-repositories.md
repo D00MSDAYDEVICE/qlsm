@@ -47,7 +47,7 @@ Inline `cvars`/`commands` need QLSM 1.36.0 or newer. Older versions ignore them.
 2. A plugin that doesn't declare its runtime needs one picked in its row before **Download selected** is enabled.
 3. Click **Download selected**.
 
-- Each plugin goes into the shared plugin folder for its runtime.
+- Each plugin goes into the shared plugin folder for its runtime: `data/shared-plugins/minqlx/` or `data/shared-plugins/minqlxtended/` under your QLSM install. That folder is kept outside the QLSM image, so downloads survive updates and are visible to every part of QLSM. The plugins QLSM ships with stay untouched; a download with the same name as a built-in plugin replaces it on every host once you confirm the overwrite prompt.
 - If a file with the same name is already there and its code differs, QLSM asks before overwriting it (a copy that only differs in line endings is left as is). Each file in that prompt has a checkbox and a **Diff** button. Untick any file you want to keep, and click **Diff** to compare this server's copy (left) with the repository's copy (right) first. Removed lines are red, added lines green, and unchanged sections are folded. Overwriting a plugin also replaces its `.ql-plugin.json` sidecar with the repository's, or removes it when the repository has none; the diff only compares the `.py` file.
 
 ![The overwrite prompt listing two existing plugins](../images/plugin-overwrite-prompt.png)

@@ -331,7 +331,7 @@ class Operator(db.Model):
 
 class PluginRepository(db.Model):
     """An external source of minqlx plugins the operator can browse and pull
-    individual files from into the local pool (ql-assets/data/<runtime>-plugins/).
+    individual files from into the local pool (data/shared-plugins/<runtime>/).
 
     The manifest is fetched over plain HTTP from `<url>/qlsm-plugins.json`
     (see ui/plugin_repositories.py) and cached here as-fetched, so browsing

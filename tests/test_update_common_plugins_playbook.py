@@ -62,15 +62,52 @@ def test_setup_host_does_not_duplicate_plugin_sync():
     assert sync_tasks == [], sync_tasks
 
 
+def _flatten(tasks):
+    """Tasks plus the contents of any block/always/rescue sections."""
+    for t in tasks:
+        yield t
+        for section in ("block", "always", "rescue"):
+            if section in t:
+                yield from _flatten(t[section])
+
+
+def _staging_tasks():
+    return list(_flatten(_load(SHARED_TASKS)))
+
+
 def test_shared_sync_task_refreshes_pool_by_full_mirror():
-    tasks = _load(SHARED_TASKS)
     sync_task = next(
-        t for t in tasks
+        t for t in _staging_tasks()
         if "synchronize" in t and "runtime_plugins_dirname" in str(t["synchronize"].get("dest", ""))
     )
     sync_args = sync_task["synchronize"]
     assert sync_args["delete"] is True
     assert sync_args["dest"] == "{{ common_assets_dir }}/{{ runtime_plugins_dirname }}/"
+    # One mirror of one staged directory: --delete would otherwise remove
+    # operator plugins right after built-in ones were synced, or vice versa.
+    assert sync_args["src"] == "{{ merged_pool_stage.path }}/"
+
+
+def test_shared_sync_task_stages_built_in_then_operator_plugins():
+    """The host pool is the merged view from ui/plugin_pool.py: built-in
+    plugins from the image, overlaid by data/shared-plugins/<runtime>/ (the
+    bind-mounted operator tier repository downloads write to)."""
+    rsyncs = [
+        t for t in _staging_tasks()
+        if t.get("ansible.builtin.command", {}).get("argv", [None])[0] == "rsync"
+    ]
+    sources = [t["ansible.builtin.command"]["argv"][2] for t in rsyncs]
+    assert sources == [
+        "{{ playbook_dir }}/../../ql-assets/data/{{ runtime_plugins_dirname }}/",
+        "{{ playbook_dir }}/../../data/shared-plugins/{{ runtime }}/",
+    ]
+    for t in rsyncs:
+        assert t["ansible.builtin.command"]["argv"][3] == "{{ merged_pool_stage.path }}/"
+        assert t["delegate_to"] == "localhost"
+    # The operator tier is optional: a fresh install has none yet.
+    assert "local_operator_plugins_stat" in rsyncs[1]["when"]
+    cleanup = [t for t in _staging_tasks() if t.get("ansible.builtin.file", {}).get("state") == "absent"]
+    assert any(t["ansible.builtin.file"]["path"] == "{{ merged_pool_stage.path }}" for t in cleanup)
 
 
 def test_update_common_plugins_playbook_targets_the_host_runtime():

@@ -1,14 +1,20 @@
 ---
 # Shared task: refresh the host-baseline plugin pool and its core pip deps
-# from ql-assets/data/{{ runtime_plugins_dirname }}/ (the source of truth for
-# plugin logic — see qlsm-plugin-pool-vs-builtin-preset-duplication in
-# project memory). Included by setup_host.yml (new hosts) and
+# from the merged local pool: the built-in tier
+# ql-assets/data/{{ runtime_plugins_dirname }}/ (shipped in the image, the
+# source of truth for plugin logic — see
+# qlsm-plugin-pool-vs-builtin-preset-duplication in project memory) overlaid
+# by the operator tier data/shared-plugins/{{ runtime }}/ (repository
+# downloads, see ui/plugin_pool.py). The two are staged into one temp dir
+# on the controller so a single --delete mirror still removes plugins that
+# no longer exist locally. Included by setup_host.yml (new hosts) and
 # update_common_plugins.yml (existing hosts, run on demand so a plugin fix
 # doesn't require a full host setup re-run just to reach
 # /home/ql/assets/common/{{ runtime_plugins_dirname }}/).
 #
 # Requires: common_assets_dir (e.g. /home/ql/assets/common),
-#           runtime_plugins_dirname (e.g. minqlx-plugins / minqlxtended-plugins)
+#           runtime_plugins_dirname (e.g. minqlx-plugins / minqlxtended-plugins),
+#           runtime (minqlx / minqlxtended; passed by runtime_extravars())
 # Optional: skip_pip_install (default false) — set true for the on-demand
 # "Update Plugins" UI action, where the host was already fully set up once
 # and reinstalling the same pip floors on every plugin refresh only adds
@@ -63,15 +69,66 @@
   register: local_minqlx_plugins_stat
   become: no
 
-- name: Sync common plugins for the host runtime
-  synchronize:
-    src: "{{ playbook_dir }}/../../ql-assets/data/{{ runtime_plugins_dirname }}/"
-    dest: "{{ common_assets_dir }}/{{ runtime_plugins_dirname }}/"
-    private_key: "{{ ansible_ssh_private_key_file }}"
-    archive: yes
-    recursive: yes
-    delete: yes
+- name: Check if local operator plugins directory exists
+  stat:
+    path: "{{ playbook_dir }}/../../data/shared-plugins/{{ runtime }}"
+  delegate_to: localhost
+  register: local_operator_plugins_stat
+  become: no
+
+- name: Stage the merged plugin pool on the controller
   when: local_minqlx_plugins_stat.stat.exists and local_minqlx_plugins_stat.stat.isdir
+  block:
+    - name: Create staging directory for the merged plugin pool
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: qlsm-plugin-pool-
+      delegate_to: localhost
+      become: no
+      register: merged_pool_stage
+
+    - name: Stage built-in plugins
+      ansible.builtin.command:
+        argv:
+          - rsync
+          - -a
+          - "{{ playbook_dir }}/../../ql-assets/data/{{ runtime_plugins_dirname }}/"
+          - "{{ merged_pool_stage.path }}/"
+      delegate_to: localhost
+      become: no
+      changed_when: false
+
+    # Operator copies overlay built-in ones of the same name, matching
+    # ui/plugin_pool.py's merged view.
+    - name: Stage operator plugins over the built-in ones
+      ansible.builtin.command:
+        argv:
+          - rsync
+          - -a
+          - "{{ playbook_dir }}/../../data/shared-plugins/{{ runtime }}/"
+          - "{{ merged_pool_stage.path }}/"
+      delegate_to: localhost
+      become: no
+      changed_when: false
+      when: local_operator_plugins_stat.stat.exists and local_operator_plugins_stat.stat.isdir
+
+    - name: Sync common plugins for the host runtime
+      synchronize:
+        src: "{{ merged_pool_stage.path }}/"
+        dest: "{{ common_assets_dir }}/{{ runtime_plugins_dirname }}/"
+        private_key: "{{ ansible_ssh_private_key_file }}"
+        archive: yes
+        recursive: yes
+        delete: yes
+
+  always:
+    - name: Remove the merged plugin pool staging directory
+      ansible.builtin.file:
+        path: "{{ merged_pool_stage.path }}"
+        state: absent
+      delegate_to: localhost
+      become: no
+      when: merged_pool_stage.path is defined
 
 - name: Ensure correct ownership of common plugin pool
   file:

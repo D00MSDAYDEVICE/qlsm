@@ -89,12 +89,12 @@ graph TD
         * `ui/task_logic/ansible_instance_mgmt.py`: Instance deploy/restart/delete/config-sync logic.
         * `ui/task_logic/ansible_qlfilter_mgmt.py`: QLFilter install/uninstall/check.
         * `ui/task_logic/ansible_workshop_update.py`: Force workshop item update on host.
-        * `ui/task_logic/plugin_update_check.py`: "Check for Updates" diff of the `ql-assets` plugin pool against the host's common pool (ad-hoc SSH hash listing) and each instance's `scripts/` (local). Hashing and diffing live in `ui/update_checks.py`.
+        * `ui/task_logic/plugin_update_check.py`: "Check for Updates" diff of the merged plugin pool (built-in tier plus operator tier, see `plugin_pool.py`) against the host's common pool (ad-hoc SSH hash listing) and each instance's `scripts/` (local). Hashing and diffing live in `ui/update_checks.py`.
         * `ui/task_logic/ansible_plugin_update.py`: Applies selected plugin updates (common pool refresh via `update_common_plugins.yml`, per-instance file copies, optional restarts).
         * `ui/task_logic/standalone_host_setup.py` / `standalone_host_remove.py`: Lifecycle for user-provided (non-Terraform) hosts.
     * **Plugin Manifests & Repositories:**
         * `ui/plugin_manifest.py`: Reads an optional `<plugin>.ql-plugin.json` sidecar next to a `.py` plugin, supplying the label, description and editable cvar list the Plugins tab shows. The shared pool is the source of truth over a preset or instance copy.
-        * `ui/plugin_pool.py`: Resolves and lists the shared pool (`ql-assets/data/<runtime>-plugins/`), whose root-level plugins are loadable by any instance on that runtime.
+        * `ui/plugin_pool.py`: Resolves and lists the shared pool as one merged view of two tiers: the built-in tier shipped in the image (`ql-assets/data/<runtime>-plugins/`, read-only) and the operator tier under the bind-mounted `data/shared-plugins/<runtime>/` (repository downloads, visible to every container). An operator file wins over a built-in one of the same name. Root-level plugins in either tier are loadable by any instance on that runtime.
         * `ui/plugin_repositories.py`: The one component that makes **outbound HTTP requests to an operator-supplied address** — it fetches a remote `qlsm-plugins.json`, downloads individual plugin files into the shared pool, from where Ansible ships them to every host, and — for the overwrite prompt's Diff window — fetches a read-only copy of a single plugin so the repository version can be compared against the pool copy without writing anything. A `github.com` URL is rewritten to its `raw.githubusercontent.com` base. Downloaded filenames are constrained to a bare `^[A-Za-z0-9_-]+\.py$` allowlist at both parse and write time. A repo's single `qlsm-plugins.json` can carry each plugin's cvars/commands inline; download writes them into the pool as the plugin's `.ql-plugin.json`, so `ui/plugin_manifest.py` reads them unchanged.
     * **Supporting Modules:**
         * `ui/task_logic/zmq_utils.py`: ZMQ connection utilities for RCON service.
@@ -165,7 +165,7 @@ qlsm/
 │       ├── zmq_utils.py             # ZMQ utilities for RCON
 │       └── common.py            # Shared utilities (append_log, etc.)
 │   ├── plugin_manifest.py       # Reads <plugin>.ql-plugin.json sidecars (label/description/cvars)
-│   ├── plugin_pool.py           # Shared plugin pool helpers (ql-assets/data/<runtime>-plugins/)
+│   ├── plugin_pool.py           # Shared plugin pool: built-in tier (ql-assets/data/) + operator tier (data/shared-plugins/)
 │   ├── plugin_repositories.py   # External plugin repos: fetch qlsm-plugins.json, download into the pool
 │   └── data/                    # Bundled generated data
 │       └── ql_cvar_catalog.json # Engine cvars/commands for config-editor autocomplete
@@ -316,7 +316,7 @@ Lets a user move a whole QLSM instance — database rows, credentials, and manag
 **Export** (`POST /api/settings/backup/export`):
 1. Reject with `409` if `any_lock_held()` finds any `task_lock:*` key in Redis — a backup must never be taken mid-Terraform-apply or mid-Ansible-run.
 2. `serialize_database()` snapshots every backed-up table (`Host`, `QLInstance`, `User`, `ConfigPreset`, `ApiKey`, `AppSetting`, `BinaryMetadata`) to a JSON-safe dict.
-3. `backup_file_trees()` enumerates the on-disk trees to capture: SSH keys (`terraform/ssh-keys/`), Terraform state (`terraform/vultr-root/terraform.tfstate.d/`), instance configs (`configs/`, excluding the nested `presets/` subfolder), non-builtin presets (`configs/presets/`, excluding the app-shipped `_builtin/` folder), and plugin binaries for both runtimes (`ql-assets/data/minqlx-plugins/`, `ql-assets/data/minqlxtended-plugins/`, `ql-assets/data/system-hooks/`). Symlinks are never followed or copied.
+3. `backup_file_trees()` enumerates the on-disk trees to capture: SSH keys (`terraform/ssh-keys/`), Terraform state (`terraform/vultr-root/terraform.tfstate.d/`), instance configs (`configs/`, excluding the nested `presets/` subfolder), non-builtin presets (`configs/presets/`, excluding the app-shipped `_builtin/` folder), operator-downloaded plugins for both runtimes (`data/shared-plugins/`), and system hooks (`ql-assets/data/system-hooks/`). The built-in plugin pools in `ql-assets/data/` ship with the image and are not captured. Symlinks are never followed or copied.
 4. `build_backup_zip_bytes()` writes a `manifest.json` (format version, QLSM version, timestamp), `db_export.json`, and every file under `files/<prefix>/...` into one in-memory ZIP.
 5. `encrypt_archive()` wraps the ZIP bytes in a 4-byte magic header (`QLBP` plain, `QLBE` encrypted). With a password, Scrypt derives a 256-bit key from a random salt and AES-256-GCM encrypts with a random nonce; without one, the bytes pass through unmodified. The frontend's `RiskAcknowledgeModal` forces the user to explicitly acknowledge the risk before an unencrypted export is allowed.
 6. The result downloads as `qlsm-backup-<timestamp>.qlsmbak`.

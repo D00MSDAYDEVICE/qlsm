@@ -20,7 +20,7 @@ The host must be **Active**. The check connects to the host, so it can take a fe
 
 The modal has two kinds of sections.
 
-**Common plugin pool.** This is the host's shared copy of QLSM's built-in plugins. Every instance on the host gets these files unless its own plugin set already includes a file with the same name.
+**Common plugin pool.** This is the host's shared copy of QLSM's built-in plugins and of any plugin you downloaded from a [plugin repository](plugin-repositories.md). A freshly downloaded plugin shows here as **added** until you push it. Every instance on the host gets these files unless its own plugin set already includes a file with the same name.
 
 **One box per instance.** These are the plugin files that belong to that instance, the same ones you see on its **Plugins** tab. A file is listed as **updated** when the instance has its own copy and QLSM ships a different version. Plugins the instance doesn't have its own copy of aren't listed, because the instance already gets them from the common plugin pool.
 
