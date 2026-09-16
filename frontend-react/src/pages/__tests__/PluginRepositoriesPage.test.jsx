@@ -53,6 +53,9 @@ describe('PluginRepositoriesPage downloads', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPluginRepositories.mockResolvedValue([REPO]);
+    // Default resolution so a future Diff-click test fails on its own
+    // assertion rather than on an unhandled rejection from the modal's fetch.
+    mocks.getPluginRepositoryDiff.mockResolvedValue({ local: '', remote: '' });
   });
 
   it('shows a success toast on a clean download', async () => {

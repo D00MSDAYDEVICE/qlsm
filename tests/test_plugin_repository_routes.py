@@ -716,6 +716,7 @@ def test_diff_rejects_unsafe_filenames(client, app, monkeypatch, tmp_path, case,
     )
 
     assert response.status_code == 400
+    assert response.get_json()['error']['message'] == f"Refusing to diff unsafe filename: '{filename}'"
     assert fetched == []
 
 
@@ -765,6 +766,7 @@ def test_diff_unknown_repository_is_404(client, app, monkeypatch, tmp_path):
     response = client.get('/api/plugin-repositories/9999/diff?filename=balance2.py', headers=headers)
 
     assert response.status_code == 404
+    assert response.get_json()['error']['message'] == 'Repository not found.'
 
 
 def test_diff_fetch_failure_is_422_not_502(client, app, monkeypatch, tmp_path):

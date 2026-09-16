@@ -31,6 +31,10 @@ function sideExtensions(isDark) {
     // bottom panel would open thousands of pixels below the fold.
     search({ top: true }),
     keymap.of(searchKeymap),
+    // Each pane is document-tall inside the modal body's scroller, so its own
+    // horizontal scrollbar sits below the fold and is unreachable -- without
+    // wrapping, a long line is simply cut off mid-token. Wrap instead.
+    EditorView.lineWrapping,
     ...themeExtensions(isDark),
     ...mergeThemeExtensions(isDark),
   ];

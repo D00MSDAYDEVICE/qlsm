@@ -141,18 +141,16 @@ const mergeColors = {
 };
 
 const mergeTheme = (c, dark) => EditorView.theme({
-  // Inside a MergeView the outer .cm-mergeView scrolls, so each editor
-  // grows to its content instead of filling its parent.
-  '&': { height: 'auto' },
   '&.cm-merge-a .cm-changedLine': { backgroundColor: `${c.removedLine} !important` },
   '&.cm-merge-a .cm-changedText': { backgroundColor: c.removedText, textDecoration: 'none' },
   '&.cm-merge-b .cm-changedLine': { backgroundColor: `${c.addedLine} !important` },
   '&.cm-merge-b .cm-changedText': { backgroundColor: c.addedText, textDecoration: 'none' },
   '&.cm-merge-a .cm-changedLineGutter': { backgroundColor: c.gutterRemoved },
   '&.cm-merge-b .cm-changedLineGutter': { backgroundColor: c.gutterAdded },
-  // The panes have no scroller of their own here (see the height rule above),
-  // so a search panel would sit at the top of a document-tall editor and
-  // scroll away. Pin it to the top of the visible diff instead.
+  // @codemirror/merge's base theme makes each pane document-tall, and the
+  // `.plugin-diff-view` block in index.css hands the scrolling to the modal
+  // body, so a search panel would sit at the top of a document-tall editor
+  // and scroll away. Pin it to the top of the visible diff instead.
   '& .cm-panels-top': {
     position: 'sticky',
     top: '0',
