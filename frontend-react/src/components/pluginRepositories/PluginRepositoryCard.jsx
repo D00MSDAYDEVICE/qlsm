@@ -4,9 +4,9 @@ import {
 } from 'lucide-react';
 import { downloadPluginRepositoryPlugins } from '../../services/api';
 import { useNotification } from '../NotificationProvider';
-import ConfirmationModal from '../ConfirmationModal';
 import { formatDateTime } from '../../utils/uiUtils';
 import RuntimePicker from './RuntimePicker';
+import OverwritePluginsModal from './OverwritePluginsModal';
 
 // One repository's plugin list: expand/collapse, per-plugin checkboxes, and a
 // per-plugin runtime pick for selected entries that declare no runtime.
@@ -15,10 +15,10 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
   const [checked, setChecked] = useState(new Set());
   const [downloading, setDownloading] = useState(false);
   const [pickedRuntimes, setPickedRuntimes] = useState({});
-  // Filenames a download attempt reported as already present in the local
-  // pool ({ code: 'exists' } from the backend) -- offered as an overwrite
-  // confirm rather than a dead-end error, since that's the one failure mode
-  // with an obvious next step.
+  // Files a download attempt reported as already present in the local pool
+  // ({ code: 'exists' } from the backend) -- offered as an overwrite confirm
+  // rather than a dead-end error, since that's the one failure mode with an
+  // obvious next step. Shape: { files: [{filename, runtime}] }.
   const [overwriteConfirm, setOverwriteConfirm] = useState(null);
   const { showSuccess, showError } = useNotification();
 
@@ -46,7 +46,9 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
       showError(otherErrors.map(e => `${e.filename}: ${e.error}`).join(' · '));
     }
     if (existing.length) {
-      setOverwriteConfirm({ filenames: existing.map(e => e.filename) });
+      setOverwriteConfirm({
+        files: existing.map(e => ({ filename: e.filename, runtime: pickedRuntimes[e.filename] ?? null })),
+      });
     }
     if (downloaded.length || !existing.length) {
       setChecked(prev => {
@@ -91,8 +93,9 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
     runDownload([...checked]);
   };
 
-  const handleConfirmOverwrite = () => {
-    const filenames = overwriteConfirm?.filenames || [];
+  // Unticked files are simply not downloaded; they stay ticked in the list,
+  // the same as after Cancel.
+  const handleConfirmOverwrite = (filenames) => {
     setOverwriteConfirm(null);
     runDownload(filenames, true);
   };
@@ -234,14 +237,12 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
       </div>
 
       {overwriteConfirm && (
-        <ConfirmationModal
-          isOpen={!!overwriteConfirm}
-          onClose={() => setOverwriteConfirm(null)}
+        <OverwritePluginsModal
+          isOpen
+          repo={repo}
+          files={overwriteConfirm.files}
           onConfirm={handleConfirmOverwrite}
-          title="Overwrite existing plugins?"
-          message={`Already in the local pool: ${overwriteConfirm.filenames.join(', ')}. Overwrite with this repository's copy?`}
-          confirmButtonText="Overwrite"
-          confirmButtonVariant="danger"
+          onClose={() => setOverwriteConfirm(null)}
         />
       )}
     </div>
