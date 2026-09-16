@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PLUGIN_CAPS } from '../capabilities';
 import FileManager from '../FileManager';
+import { DEFAULT_SIDEBAR_WIDTH, setSidebarWidth } from '../useSidebarWidth';
 
 const BINARY_FILE = {
   name: 'foo.so',
@@ -193,5 +194,86 @@ describe('FileManager binary file handling', () => {
     await waitFor(() => expect(deleteFile).toHaveBeenCalledWith('plugins/foo.so'));
     expect(screen.getByText(/select a file to view or edit/i)).toBeInTheDocument();
     expect(screen.queryByText('Temporary hook')).not.toBeInTheDocument();
+  });
+});
+
+describe('FileManager sidebar resizing', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    // The width store is a module-level singleton shared by every mounted
+    // FileManager, so put it back to the default between cases.
+    setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+  });
+
+  it('renders the sidebar at the default width with a resize handle', () => {
+    renderFileManager();
+
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '320px' });
+    expect(screen.getByTestId('sidebar-resize-handle')).toBeInTheDocument();
+  });
+
+  it('applies a width persisted by an earlier session', () => {
+    setSidebarWidth(440);
+    renderFileManager();
+
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '440px' });
+  });
+
+  it('widens the sidebar as the handle is dragged right', () => {
+    renderFileManager();
+    const handle = screen.getByTestId('sidebar-resize-handle');
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 320 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 420 });
+
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '420px' });
+
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+  });
+
+  it('ignores pointer movement once the drag has ended', () => {
+    renderFileManager();
+    const handle = screen.getByTestId('sidebar-resize-handle');
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 320 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 420 });
+    fireEvent.pointerUp(handle, { pointerId: 1 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 500 });
+
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '420px' });
+  });
+
+  it('stops at the minimum width when dragged far left', () => {
+    renderFileManager();
+    const handle = screen.getByTestId('sidebar-resize-handle');
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 320 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 0 });
+
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '200px' });
+  });
+
+  it('resets to the default width on a double click', () => {
+    setSidebarWidth(500);
+    renderFileManager();
+
+    fireEvent.doubleClick(screen.getByTestId('sidebar-resize-handle'));
+
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '320px' });
+  });
+
+  it('nudges the width with the arrow keys and resets with Home', () => {
+    renderFileManager();
+    const handle = screen.getByTestId('sidebar-resize-handle');
+
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '336px' });
+
+    fireEvent.keyDown(handle, { key: 'ArrowLeft' });
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '320px' });
+
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyDown(handle, { key: 'Home' });
+    expect(screen.getByTestId('file-manager-sidebar')).toHaveStyle({ width: '320px' });
   });
 });

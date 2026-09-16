@@ -6,8 +6,10 @@ import FileSidebarActions from './FileSidebarActions';
 import FileTree from './FileTree';
 import NewFileModal from './NewFileModal';
 import RenameFileModal from './RenameFileModal';
+import SidebarResizeHandle from './SidebarResizeHandle';
 import { basename } from './fileManagerUtils';
 import { useFileManagerController } from './useFileManagerController';
+import { useSidebarWidth } from './useSidebarWidth';
 
 function buildDeleteMessage(target) {
   if (!target) return '';
@@ -35,6 +37,7 @@ const FileManager = forwardRef(function FileManager({
   binaryContext = null,
   onEditCvars = null,
 }, ref) {
+  const sidebarWidth = useSidebarWidth();
   const controller = useFileManagerController({
     adapter,
     capabilities,
@@ -80,7 +83,11 @@ const FileManager = forwardRef(function FileManager({
 
   return (
     <div className="flex h-full min-h-0 border border-[var(--surface-border)] rounded overflow-hidden">
-      <div className="w-64 min-h-0 flex-shrink-0 border-r border-[var(--surface-border)] bg-[var(--surface-base)] flex flex-col">
+      <div
+        className="min-h-0 flex-shrink-0 bg-[var(--surface-base)] flex flex-col"
+        style={{ width: `${sidebarWidth}px` }}
+        data-testid="file-manager-sidebar"
+      >
         <FileTree
           files={controller.files}
           selectedPath={controller.selectedFile?.path}
@@ -110,6 +117,7 @@ const FileManager = forwardRef(function FileManager({
           onUpload={controller.handleUpload}
         />
       </div>
+      <SidebarResizeHandle />
       <div className="flex-1 min-w-0 min-h-0 bg-[var(--surface-base)] flex flex-col">
         {controller.actionError && (
           <div className="px-3 py-2 text-sm text-[var(--accent-danger)] border-b border-[var(--surface-border)]">
