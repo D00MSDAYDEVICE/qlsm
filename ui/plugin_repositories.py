@@ -12,7 +12,8 @@ Repo manifest shape, all fields but `filename` optional:
     {"plugins": [
         {"filename": "some_plugin.py", "label": "...", "description": "...",
          "runtime": "minqlx" | "minqlxtended" | "minqlxtended-patched",
-         "requires_qlsm_version": "1.30.0"},
+         "requires_qlsm_version": "1.30.0",
+         "cvars": [...], "commands": [...]},
         ...
     ]}
 `filename` must be a bare, root-level, importable module name ending in
@@ -21,15 +22,22 @@ pluginSelection.js isEnableablePluginPath). `requires_qlsm_version` is the
 plugin author's own claim, compared against this qlsm's own VERSION file by
 version_risk() below -- see that function's docstring for what "risk" does
 and does not mean here (operator decision, 2026-09-14).
+`cvars`/`commands` use the `.ql-plugin.json` shape; on download they (with
+label/description) become the plugin's pool sidecar unless the repo also
+ships a separate `<plugin>.ql-plugin.json`, which wins.
 """
 import json
+import logging
 import os
 import re
 
 import requests
 
+from ui.plugin_manifest import PLUGIN_MANIFEST_MAX_SIZE
 from ui.plugin_pool import pool_dir as shared_pool_dir
 from ui.runtime import is_valid_runtime
+
+logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = 'qlsm-plugins.json'
 MANIFEST_MAX_SIZE = 256 * 1024
@@ -39,6 +47,12 @@ FETCH_TIMEOUT_SECONDS = 10
 # A plugin file is a Python module loaded by bare name -- no dots, no path
 # separators, nothing but what a valid module name and this pool allow.
 _FILENAME_RE = re.compile(r'^[A-Za-z0-9_\-]+\.py$')
+
+# The part of a repo manifest entry that becomes the plugin's pool sidecar
+# (<plugin>.ql-plugin.json). Everything else on an entry (filename, runtime,
+# requires_qlsm_version) only matters for listing/downloading.
+_SIDECAR_FIELDS = ('label', 'description', 'cvars', 'commands')
+_INLINE_LIST_FIELDS = ('cvars', 'commands')
 
 
 class PluginRepositoryError(Exception):
@@ -157,7 +171,7 @@ def fetch_manifest(base_url):
         filename = entry.get('filename')
         if not isinstance(filename, str) or not _FILENAME_RE.match(filename):
             continue
-        plugins.append({
+        plugin = {
             'filename': filename,
             'label': entry['label'] if isinstance(entry.get('label'), str) and entry['label'].strip() else None,
             'description': (
@@ -170,8 +184,32 @@ def fetch_manifest(base_url):
                 if isinstance(entry.get('requires_qlsm_version'), str) and entry['requires_qlsm_version'].strip()
                 else None
             ),
-        })
+        }
+        # Inline sidecar metadata: kept only when well-formed, and only added
+        # when present so plain entries keep their existing shape.
+        for field in _INLINE_LIST_FIELDS:
+            if isinstance(entry.get(field), list):
+                plugin[field] = entry[field]
+        plugins.append(plugin)
     return plugins
+
+
+def build_inline_manifest(entry):
+    """The pool sidecar dict for a repo manifest entry, or None when the entry
+    carries no metadata (a bare {"filename": ...}, or only empty values) or
+    the result is bigger than plugin_manifest.py would read anyway. The size
+    is measured on compact json.dumps() output, which is exactly what
+    download_plugin() writes."""
+    if not entry:
+        return None
+    # Falsy means absent: None, '' and [] all count as "no metadata here".
+    manifest = {field: entry[field] for field in _SIDECAR_FIELDS if entry.get(field)}
+    if not manifest:
+        return None
+    if len(json.dumps(manifest).encode('utf-8')) > PLUGIN_MANIFEST_MAX_SIZE:
+        logger.warning(f"Inline manifest for {entry.get('filename')} exceeds {PLUGIN_MANIFEST_MAX_SIZE} bytes, skipping")
+        return None
+    return manifest
 
 
 def _read_app_version():

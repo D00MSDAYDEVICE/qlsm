@@ -5,6 +5,7 @@ import pytest
 import ui.plugin_repositories as plugin_repositories
 from ui.plugin_repositories import (
     PluginRepositoryError,
+    build_inline_manifest,
     download_plugin,
     fetch_manifest,
     version_risk,
@@ -57,6 +58,51 @@ def test_fetch_manifest_drops_bad_entries_but_keeps_good_ones(monkeypatch):
     assert [p['filename'] for p in plugins] == ['good.py', 'also_good.py']
     # An unrecognized runtime string is dropped to None rather than kept raw.
     assert plugins[1]['runtime'] is None
+
+
+def test_fetch_manifest_keeps_list_cvars_and_commands(monkeypatch):
+    cvars = [{'cvar': 'qlx_demo', 'type': 'bool', 'default': False}]
+    commands = [{'name': '!demo', 'description': 'Demo'}]
+    manifest = {'plugins': [
+        {'filename': 'demo.py', 'cvars': cvars, 'commands': commands},
+        {'filename': 'bad.py', 'cvars': 'not-a-list', 'commands': {'a': 1}},
+    ]}
+    monkeypatch.setattr(
+        plugin_repositories.requests, 'get',
+        lambda url, timeout: FakeResponse(200, json.dumps(manifest).encode()),
+    )
+    plugins = fetch_manifest('https://example.com/repo')
+    assert plugins[0]['cvars'] == cvars
+    assert plugins[0]['commands'] == commands
+    # Malformed fields are dropped, the plugin itself stays listed.
+    assert plugins[1]['filename'] == 'bad.py'
+    assert 'cvars' not in plugins[1]
+    assert 'commands' not in plugins[1]
+
+
+# --- build_inline_manifest ---
+
+def test_build_inline_manifest_keeps_only_metadata_fields():
+    entry = {
+        'filename': 'demo.py', 'label': 'Demo', 'description': None,
+        'runtime': 'minqlx', 'requires_qlsm_version': '1.0.0', 'version_risk': None,
+        'cvars': [{'cvar': 'qlx_demo'}],
+    }
+    assert build_inline_manifest(entry) == {'label': 'Demo', 'cvars': [{'cvar': 'qlx_demo'}]}
+
+
+def test_build_inline_manifest_none_for_bare_entry():
+    assert build_inline_manifest({'filename': 'demo.py', 'label': None, 'description': None,
+                                  'runtime': None, 'requires_qlsm_version': None}) is None
+    assert build_inline_manifest(None) is None
+    # Scaffolded empty lists are "no metadata" too -- they must not produce a
+    # {"cvars": []} sidecar that stops a stale one from being cleaned up.
+    assert build_inline_manifest({'filename': 'demo.py', 'cvars': [], 'commands': []}) is None
+
+
+def test_build_inline_manifest_none_when_over_the_sidecar_size_cap():
+    entry = {'filename': 'demo.py', 'description': 'x' * (16 * 1024 + 1)}
+    assert build_inline_manifest(entry) is None
 
 
 def test_fetch_manifest_requests_the_manifest_filename(monkeypatch):
