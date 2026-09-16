@@ -183,6 +183,8 @@ vi.mock('../../fileManager', () => ({
     allowedExtensions: ['.factories'],
     protectedFiles: [],
   },
+  getPluginDisplayLabel: (item) => item?.name,
+  PluginCvarsModal: () => null,
   FileManager: React.forwardRef(function MockFileManager(props, ref) {
     mocks.fileManagerProps.push(props);
     useImperativeHandle(ref, () => ({
@@ -280,6 +282,15 @@ vi.mock('../../../codemirror-lang-qlcfg', () => ({
   qlcfgLanguage: {},
   createQlCfgLinter: vi.fn(() => vi.fn()),
   stripManagedCvars: vi.fn((value) => value),
+  setCvarCatalog: vi.fn(),
+  registerPluginCvarProvider: vi.fn(() => vi.fn()),
+  getCvarCatalog: vi.fn(() => ({ cvars: [], commands: [], gametypes: [], sources: {} })),
+}));
+
+vi.mock('../../../codemirror-lang-qlfactories', () => ({
+  qlFactoriesLanguage: {},
+  qlFactoriesLinterSource: vi.fn(() => vi.fn()),
+  qlFactoriesCompletion: [],
 }));
 
 vi.mock('../../../codemirror-lang-qlmappool', () => ({
@@ -414,6 +425,55 @@ describe('EditInstanceConfigModal preset saving', () => {
         checked_factories: [],
       })
     );
+  });
+
+  it('folds a loaded preset\'s plugin dependency in from the draft tree', async () => {
+    // handleLoadPreset passes the draft tree to partitionCheckedPaths so a
+    // preset that only recorded mybalance.py still enables the iouonegirl.py
+    // it declares. A stale [] in that callback's deps made the tree argument
+    // inert and silently dropped the dependency.
+    // The draft tree is empty on the first render and arrives after it, which
+    // is what the real workspace does -- and what makes the callback capture a
+    // stale [] unless the tree is in its dependency list.
+    mocks.useDraftWorkspace.mockReturnValueOnce({ ...baseDraftWorkspace, tree: [] });
+    mocks.useDraftWorkspace.mockReturnValue({
+      ...baseDraftWorkspace,
+      tree: [
+        {
+          type: 'file', name: 'mybalance.py', path: 'mybalance.py',
+          plugin_manifest: { depends_on: ['iouonegirl.py'] },
+        },
+        { type: 'file', name: 'iouonegirl.py', path: 'iouonegirl.py' },
+      ],
+    });
+    mocks.getPresetById.mockResolvedValue({
+      name: 'dep-preset',
+      configs: {},
+      factories: {},
+      checked_plugins: ['mybalance.py'],
+    });
+
+    render(
+      <EditInstanceConfigModal
+        isOpen={true}
+        onClose={vi.fn()}
+        instanceId={1}
+        instanceName="Test123"
+        onConfigSaved={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /load preset/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /load preset/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm load preset/i }));
+    await waitFor(() => expect(mocks.getPresetById).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole('button', { name: /save preset/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm save preset/i }));
+
+    await waitFor(() => expect(mocks.createPreset).toHaveBeenCalledTimes(1));
+    expect(mocks.createPreset.mock.calls[0][0].checked_plugins.sort())
+      .toEqual(['iouonegirl.py', 'mybalance.py']);
   });
 
   it('shows the modal while the admin read is still running and the preset waits for it', async () => {

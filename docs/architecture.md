@@ -92,6 +92,10 @@ graph TD
         * `ui/task_logic/plugin_update_check.py`: "Check for Updates" diff of the `ql-assets` plugin pool against the host's common pool (ad-hoc SSH hash listing) and each instance's `scripts/` (local). Hashing and diffing live in `ui/update_checks.py`.
         * `ui/task_logic/ansible_plugin_update.py`: Applies selected plugin updates (common pool refresh via `update_common_plugins.yml`, per-instance file copies, optional restarts).
         * `ui/task_logic/standalone_host_setup.py` / `standalone_host_remove.py`: Lifecycle for user-provided (non-Terraform) hosts.
+    * **Plugin Manifests & Repositories:**
+        * `ui/plugin_manifest.py`: Reads an optional `<plugin>.ql-plugin.json` sidecar next to a `.py` plugin, supplying the label, description and editable cvar list the Plugins tab shows. The shared pool is the source of truth over a preset or instance copy.
+        * `ui/plugin_pool.py`: Resolves and lists the shared pool (`ql-assets/data/<runtime>-plugins/`), whose root-level plugins are loadable by any instance on that runtime.
+        * `ui/plugin_repositories.py`: The one component that makes **outbound HTTP requests to an operator-supplied address** — it fetches a remote `qlsm-plugins.json` and downloads individual plugin files into the shared pool, from where Ansible ships them to every host. A `github.com` URL is rewritten to its `raw.githubusercontent.com` base. Downloaded filenames are constrained to a bare `^[A-Za-z0-9_-]+\.py$` allowlist at both parse and write time.
     * **Supporting Modules:**
         * `ui/task_logic/zmq_utils.py`: ZMQ connection utilities for RCON service.
         * `ui/task_logic/job_failure_handlers.py`: RQ failure callbacks.
@@ -160,6 +164,13 @@ qlsm/
 │       ├── job_failure_handlers.py  # RQ failure callbacks
 │       ├── zmq_utils.py             # ZMQ utilities for RCON
 │       └── common.py            # Shared utilities (append_log, etc.)
+│   ├── plugin_manifest.py       # Reads <plugin>.ql-plugin.json sidecars (label/description/cvars)
+│   ├── plugin_pool.py           # Shared plugin pool helpers (ql-assets/data/<runtime>-plugins/)
+│   ├── plugin_repositories.py   # External plugin repos: fetch qlsm-plugins.json, download into the pool
+│   └── data/                    # Bundled generated data
+│       └── ql_cvar_catalog.json # Engine cvars/commands for config-editor autocomplete
+│
+├── scripts/cvar-catalog/        # Inputs for scripts/gen_cvar_catalog.py (listcvars dump, curated text)
 │
 ├── frontend-react/src/          # React SPA
 │   ├── pages/                   # Page components (ServersPage, SettingsPage, etc.)

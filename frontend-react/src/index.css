@@ -868,6 +868,24 @@ body {
   transition: max-height 0.45s ease-in;
 }
 
+/* Standalone expander with the same timing as .instances-section, but animated
+   on grid rows so content taller than 800px (e.g. large plugin repos) isn't clipped. */
+.collapsible-section {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s ease-out;
+}
+
+.collapsible-section.is-expanded {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.45s ease-in;
+}
+
+.collapsible-section > .collapsible-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Instance sub-header background */
 .instances-header-row {
   background: var(--surface-elevated);
