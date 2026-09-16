@@ -60,6 +60,12 @@ export function getPluginCommands(item) {
 
 const CVAR_TYPES = new Set(['bool', 'number', 'string']);
 
+// A cvar name goes into a `set <cvar> "<value>"` line verbatim, so anything
+// beyond a bare identifier would let a manifest append its own config lines
+// (a downloaded plugin's sidecar is untrusted input -- see
+// ui/plugin_repositories.py). Engine and qlx_ cvars are all of this shape.
+const CVAR_NAME_RE = /^[A-Za-z0-9_]+$/;
+
 // Cvars the plugin exposes for editing, filtered/normalized to a safe shape.
 // An entry missing a cvar name or with an unrecognized type is dropped
 // rather than thrown, since a bad manifest should degrade to no edit form,
@@ -69,7 +75,8 @@ export function getPluginCvars(item) {
   const cvars = manifest?.cvars;
   if (!Array.isArray(cvars)) return [];
   return cvars
-    .filter(c => c && typeof c === 'object' && typeof c.cvar === 'string' && c.cvar.trim() && CVAR_TYPES.has(c.type))
+    .filter(c => c && typeof c === 'object' && typeof c.cvar === 'string'
+      && CVAR_NAME_RE.test(c.cvar.trim()) && CVAR_TYPES.has(c.type))
     .map(c => {
       const cvar = c.cvar.trim();
       const label = typeof c.label === 'string' && c.label.trim() ? c.label.trim() : cvar;

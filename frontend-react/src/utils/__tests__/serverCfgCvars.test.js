@@ -105,3 +105,15 @@ describe('configs written by hand', () => {
     expect(upsertCvarInConfig('  seta qlx_foo "1"', 'qlx_foo', '0')).toBe('  seta qlx_foo "0"');
   });
 });
+
+describe('untrusted values', () => {
+  it('drops a quote and newline so a value cannot start a new config line', () => {
+    const cfg = upsertCvarInConfig('', 'qlx_greeting', 'hi"\nset rconpassword "pwned');
+    expect(cfg).toBe('set qlx_greeting "hiset rconpassword pwned"');
+    expect(cfg.split('\n')).toHaveLength(1);
+  });
+
+  it('keeps an ordinary value untouched', () => {
+    expect(upsertCvarInConfig('', 'qlx_greeting', 'hello there')).toBe('set qlx_greeting "hello there"');
+  });
+});

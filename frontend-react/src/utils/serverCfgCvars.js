@@ -21,10 +21,17 @@ export function readCvarFromConfig(cfgText, cvar) {
   return match[3] !== undefined ? match[3] : match[2];
 }
 
-// No quote-escaping, matching the existing sv_hostname sync's behavior. An
-// existing line keeps its own set/seta keyword and indentation; only the value
-// is rewritten, and it comes back quoted.
-export function upsertCvarInConfig(cfgText, cvar, value) {
+// Quake Live has no quote escaping, so a value can hold neither a quote nor a
+// newline -- both are dropped rather than written, since either would end the
+// `set` line early and let the rest be read as further config lines (a plugin
+// manifest's declared default is untrusted input). An existing line keeps its
+// own set/seta keyword and indentation; only the value is rewritten, quoted.
+export function sanitizeCvarValue(value) {
+  return String(value ?? '').replace(/["\r\n]/g, '');
+}
+
+export function upsertCvarInConfig(cfgText, cvar, rawValue) {
+  const value = sanitizeCvarValue(rawValue);
   const cfg = cfgText || '';
   const regex = buildCvarRegex(cvar);
   const match = cfg.match(regex);

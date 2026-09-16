@@ -90,6 +90,15 @@ describe('getPluginCommands', () => {
 });
 
 describe('getPluginCvars', () => {
+  it('drops a cvar whose name is not a bare identifier', () => {
+    const item = { plugin_manifest: { cvars: [
+      { cvar: 'qlx_ok', type: 'bool' },
+      { cvar: 'qlx_x "1"\nset rconpassword "pwned', type: 'string' },
+      { cvar: 'qlx bad', type: 'string' },
+    ] } };
+    expect(getPluginCvars(item).map(c => c.cvar)).toEqual(['qlx_ok']);
+  });
+
   it('normalizes a full cvar entry for each supported type', () => {
     const item = {
       plugin_manifest: {
