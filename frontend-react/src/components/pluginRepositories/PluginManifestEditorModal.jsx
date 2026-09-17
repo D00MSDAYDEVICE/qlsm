@@ -1,14 +1,29 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogBackdrop } from '@headlessui/react';
 import {
-  X, FileJson, Plus, Trash2, AlertTriangle, Download, CircleAlert,
+  closestCenter, DndContext, DragOverlay, KeyboardSensor, PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  X, FileJson, Plus, Trash2, AlertTriangle, Download, CircleAlert, GripVertical, ArrowDownAZ,
 } from 'lucide-react';
 import { RUNTIME_OPTIONS } from '../../constants/runtimes';
 import { validateManifestPlugins, issueCounts } from '../../utils/pluginManifestValidation';
 import { triggerManifestDownload } from '../../utils/pluginManifestDownload';
 
+// A stable id per plugin row for @dnd-kit and React keys -- plugin.filename
+// can't serve that role here the way it does for HookRow's SortableHookRow,
+// since a freshly-added plugin starts blank and two rows can briefly share
+// (or lack) a filename while the operator is mid-edit.
+let pluginKeySeed = 0;
+const makePluginKey = () => `plugin-${pluginKeySeed++}`;
+
 // Blank plugin/cvar/command shapes for "+ Add".
 const blankPlugin = () => ({
+  _key: makePluginKey(),
   filename: '', label: '', description: '', runtime: '', requires_qlsm_version: '', cvars: [], commands: [],
 });
 const blankCvar = () => ({ cvar: '', label: '', type: 'string', default: '', description: '' });
@@ -18,6 +33,72 @@ function defaultForCvarType(type) {
   if (type === 'number') return 0;
   if (type === 'bool') return false;
   return '';
+}
+
+// One row in the plugin list: a drag handle (reorder), the select area, and
+// a remove button -- three separate controls rather than one nested inside
+// another, so the drag listeners never fight the click handler.
+function SortablePluginRow({ plugin, isSelected, errorBucket, onSelect, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: plugin._key });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+  const displayName = plugin.label || plugin.filename || 'plugin';
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-1 px-2 py-2 text-sm border-b border-[var(--surface-border)] last:border-b-0 transition-colors ${
+        isSelected ? 'bg-black/[0.05] dark:bg-white/[0.06]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.03]'
+      }`}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`Reorder ${displayName}`}
+        className="flex-shrink-0 p-1 rounded text-slate-500 hover:text-slate-300 cursor-grab touch-none"
+      >
+        <GripVertical size={14} />
+      </button>
+      <button type="button" onClick={onSelect} className="flex items-center gap-2 min-w-0 flex-1 text-left">
+        <span
+          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+            errorBucket?.errors ? 'bg-red-500' : errorBucket?.warnings ? 'bg-amber-500' : 'bg-emerald-500'
+          }`}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[var(--text-primary)]">{plugin.label || plugin.filename || '(untitled)'}</span>
+          <span className="block truncate font-mono text-[11px] text-[var(--text-muted)]">{plugin.filename || '—'}</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${displayName}`}
+        className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 flex-shrink-0"
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+}
+
+// What follows the cursor while a row is being dragged -- a static snapshot,
+// so it doesn't need (and shouldn't have) its own drag listeners.
+function PluginRowOverlay({ plugin }) {
+  return (
+    <div className="flex items-center gap-1 px-2 py-2 text-sm bg-[var(--surface-raised)] border border-[var(--surface-border)] rounded-md shadow-lg">
+      <span className="flex-shrink-0 p-1 text-slate-400"><GripVertical size={14} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[var(--text-primary)]">{plugin.label || plugin.filename || '(untitled)'}</span>
+        <span className="block truncate font-mono text-[11px] text-[var(--text-muted)]">{plugin.filename || '—'}</span>
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -44,6 +125,7 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
       // requires_qlsm_version + this install's own VERSION and is never
       // something to author or ship in the file.
       const draft = (repo?.plugins || []).map((p) => ({
+        _key: makePluginKey(),
         filename: p.filename || '',
         label: p.label || '',
         description: p.description || '',
@@ -108,6 +190,54 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
     triggerManifestDownload(filename, plugins);
   };
 
+  // Reordering (drag or Sort A-Z) moves plugins around in the array, so the
+  // currently-selected row is tracked by its stable _key across the move and
+  // selectedIndex is recomputed from where that key landed -- an index alone
+  // would end up pointed at whatever plugin happened to slide into that slot.
+  const reorderTo = (nextPlugins) => {
+    const selectedKey = selectedIndex >= 0 ? plugins[selectedIndex]?._key : null;
+    setPlugins(nextPlugins);
+    if (selectedKey) {
+      const nextIndex = nextPlugins.findIndex((p) => p._key === selectedKey);
+      setSelectedIndex(nextIndex);
+    }
+  };
+
+  const handleSortAlpha = () => {
+    const sorted = [...plugins].sort((a, b) => (
+      (a.label || a.filename || '').localeCompare(b.label || b.filename || '', undefined, { sensitivity: 'base' })
+    ));
+    reorderTo(sorted);
+  };
+
+  const [activeKey, setActiveKey] = useState(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const itemKeys = useMemo(() => plugins.map((p) => p._key), [plugins]);
+  const activePlugin = useMemo(
+    () => (activeKey ? plugins.find((p) => p._key === activeKey) : null),
+    [activeKey, plugins],
+  );
+
+  const handleDragStart = useCallback((event) => {
+    setActiveKey(event.active.id);
+  }, []);
+  const handleDragEnd = useCallback((event) => {
+    setActiveKey(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = plugins.findIndex((p) => p._key === active.id);
+    const newIndex = plugins.findIndex((p) => p._key === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    reorderTo(arrayMove(plugins, oldIndex, newIndex));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plugins, selectedIndex]);
+  const handleDragCancel = useCallback(() => {
+    setActiveKey(null);
+  }, []);
+
   const selected = selectedIndex >= 0 ? plugins[selectedIndex] : null;
 
   return (
@@ -143,45 +273,45 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
               {/* Plugin list */}
               <div className="flex flex-col min-h-0 border border-[var(--surface-border)] rounded-lg overflow-hidden">
                 <div className="flex-1 overflow-y-auto scrollbar-thin divide-y divide-[var(--surface-border)]">
-                  {plugins.map((p, i) => {
-                    const bucket = issuesByPlugin.get(i);
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => setSelectedIndex(i)}
-                        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                          i === selectedIndex ? 'bg-black/[0.05] dark:bg-white/[0.06]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.03]'
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                            bucket?.errors ? 'bg-red-500' : bucket?.warnings ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                    onDragCancel={handleDragCancel}
+                  >
+                    <SortableContext items={itemKeys} strategy={verticalListSortingStrategy}>
+                      {plugins.map((p, i) => (
+                        <SortablePluginRow
+                          key={p._key}
+                          plugin={p}
+                          isSelected={i === selectedIndex}
+                          errorBucket={issuesByPlugin.get(i)}
+                          onSelect={() => setSelectedIndex(i)}
+                          onRemove={() => removePlugin(i)}
                         />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[var(--text-primary)]">{p.label || p.filename || '(untitled)'}</span>
-                          <span className="block truncate font-mono text-[11px] text-[var(--text-muted)]">{p.filename || '—'}</span>
-                        </span>
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Remove ${p.label || p.filename || 'plugin'}`}
-                          onClick={(e) => { e.stopPropagation(); removePlugin(i); }}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); removePlugin(i); } }}
-                          className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 flex-shrink-0"
-                        >
-                          <Trash2 size={13} />
-                        </span>
-                      </button>
-                    );
-                  })}
+                      ))}
+                    </SortableContext>
+                    <DragOverlay dropAnimation={null}>
+                      {activePlugin ? <PluginRowOverlay plugin={activePlugin} /> : null}
+                    </DragOverlay>
+                  </DndContext>
                   {plugins.length === 0 && (
                     <p className="text-sm text-[var(--text-muted)] p-3">No plugins yet.</p>
                   )}
                 </div>
-                <div className="p-2 border-t border-[var(--surface-border)] flex-shrink-0">
-                  <button type="button" onClick={addPlugin} className="btn btn-secondary w-full justify-center">
+                <div className="p-2 border-t border-[var(--surface-border)] flex-shrink-0 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSortAlpha}
+                    disabled={plugins.length < 2}
+                    title="Sort plugins A to Z by label"
+                    className="btn btn-secondary flex-1 justify-center !px-2"
+                  >
+                    <ArrowDownAZ className="w-4 h-4" />
+                    Sort A–Z
+                  </button>
+                  <button type="button" onClick={addPlugin} className="btn btn-secondary flex-1 justify-center !px-2">
                     <Plus className="w-4 h-4" />
                     Add Plugin
                   </button>
