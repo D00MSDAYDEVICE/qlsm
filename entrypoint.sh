@@ -61,6 +61,8 @@ if [ "${RUN_MIGRATIONS}" = "true" ]; then
         echo "[entrypoint] First run — initializing database..."
         flask init-db
         flask db stamp head
+        # First run only, so a repository the operator deletes stays deleted.
+        flask seed-plugin-repositories || echo "[entrypoint] WARNING: seeding plugin repositories failed"
         echo "[entrypoint] Database ready."
     else
         # Guard against partial first-run: DB file exists but schema is missing
@@ -77,6 +79,7 @@ print('yes' if 'alembic_version' in tables else 'no')
             echo "[entrypoint] DB file exists but schema is missing — re-initializing..."
             flask init-db
             flask db stamp head
+            flask seed-plugin-repositories || echo "[entrypoint] WARNING: seeding plugin repositories failed"
             echo "[entrypoint] Database ready."
         else
             echo "[entrypoint] Running database migrations..."
