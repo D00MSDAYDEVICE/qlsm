@@ -45,7 +45,16 @@ def push_pool_to_hosts(runtimes):
             continue
 
         token = str(uuid.uuid4())
-        if not acquire_lock('host', host.id, token, ttl=PUSH_LOCK_TTL):
+        # acquire_lock talks to Redis, so it raises when Redis is down. The
+        # plugin files are already in the pool by the time we get here, so a
+        # dead Redis must skip this host, not fail the operator's download.
+        try:
+            locked = acquire_lock('host', host.id, token, ttl=PUSH_LOCK_TTL)
+        except Exception:
+            log.exception(f"push_pool_to_hosts: could not take the host lock for host {host.name}")
+            result["skipped"].append({"id": host.id, "name": host.name, "reason": "lock unavailable"})
+            continue
+        if not locked:
             result["skipped"].append({"id": host.id, "name": host.name, "reason": "busy"})
             continue
         try:
@@ -54,7 +63,12 @@ def push_pool_to_hosts(runtimes):
                 lock_token=token, on_failure=host_job_failure_handler,
             )
         except Exception:
-            release_lock('host', host.id, token)
+            # Whatever broke the enqueue (usually Redis) breaks the release too,
+            # so the best effort here must not escape either.
+            try:
+                release_lock('host', host.id, token)
+            except Exception:
+                log.exception(f"push_pool_to_hosts: could not release the host lock for host {host.name}")
             log.exception(f"push_pool_to_hosts: could not enqueue common pool refresh for host {host.name}")
             result["skipped"].append({"id": host.id, "name": host.name, "reason": "enqueue failed"})
             continue

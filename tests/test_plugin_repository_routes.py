@@ -873,3 +873,42 @@ def test_download_does_not_push_when_nothing_was_downloaded(client, app, monkeyp
     assert response.status_code == 422
     assert 'push' not in response.get_json()
     assert called == []
+
+
+def test_download_still_succeeds_when_the_push_cannot_take_the_host_lock(client, app, monkeypatch):
+    """Redis down used to make the whole download 500 even though the files had
+    already landed in the pool, and the retry then hit the overwrite prompt."""
+    from ui.models import Host, HostStatus
+    _patch_fetch(monkeypatch, error='offline')
+    make_user(app, 'dllock', 'password123')
+    headers = auth_headers(app, 'dllock')
+    with app.app_context():
+        repo = _seeded_repo('Repo R', 'https://example.com/r')
+        repo_id = repo.id
+        host = Host(name='redis-down', provider='standalone', ip_address='10.0.0.9',
+                    runtime='minqlx', status=HostStatus.ACTIVE)
+        db.session.add(host)
+        db.session.commit()
+        host_id = host.id
+
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None: None,
+    )
+    import ui.plugin_push as plugin_push
+
+    def dead_redis(*args, **kwargs):
+        raise RuntimeError('Error 111 connecting to redis:6379. Connection refused.')
+    monkeypatch.setattr(plugin_push, 'acquire_lock', dead_redis)
+
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py']},
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body['downloaded'] == ['balance2.py']
+    assert body['push']['queued'] == []
+    assert body['push']['skipped'] == [
+        {'id': host_id, 'name': 'redis-down', 'reason': 'lock unavailable'}
+    ]

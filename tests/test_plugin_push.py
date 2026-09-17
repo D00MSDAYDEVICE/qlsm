@@ -78,3 +78,35 @@ def test_empty_runtimes_touches_nothing(app):
     with app.app_context():
         _host('a', 'minqlx', HostStatus.ACTIVE)
         assert plugin_push.push_pool_to_hosts(set()) == {'queued': [], 'skipped': []}
+
+
+@patch('ui.plugin_push.enqueue_task')
+@patch('ui.plugin_push.acquire_lock', side_effect=RuntimeError('redis down'))
+def test_skips_the_host_when_the_lock_cannot_be_taken(mock_lock, mock_enqueue, app):
+    """Redis down must not turn a finished download into a 500: the files are
+    already in the pool, so the host is reported as skipped instead."""
+    with app.app_context():
+        host = _host('no-redis', 'minqlx', HostStatus.ACTIVE)
+        other = _host('no-redis-2', 'minqlx', HostStatus.ACTIVE)
+
+        result = plugin_push.push_pool_to_hosts({'minqlx'})
+
+        assert result['queued'] == []
+        assert result['skipped'] == [
+            {'id': host.id, 'name': 'no-redis', 'reason': 'lock unavailable'},
+            {'id': other.id, 'name': 'no-redis-2', 'reason': 'lock unavailable'},
+        ]
+        mock_enqueue.assert_not_called()
+
+
+@patch('ui.plugin_push.release_lock', side_effect=RuntimeError('redis down'))
+@patch('ui.plugin_push.enqueue_task', side_effect=RuntimeError('redis down'))
+@patch('ui.plugin_push.acquire_lock', return_value=True)
+def test_a_failing_lock_release_still_reports_the_host_as_skipped(mock_lock, mock_enqueue, mock_release, app):
+    with app.app_context():
+        host = _host('release-fails', 'minqlx', HostStatus.ACTIVE)
+
+        result = plugin_push.push_pool_to_hosts({'minqlx'})
+
+        assert result['queued'] == []
+        assert result['skipped'] == [{'id': host.id, 'name': 'release-fails', 'reason': 'enqueue failed'}]
