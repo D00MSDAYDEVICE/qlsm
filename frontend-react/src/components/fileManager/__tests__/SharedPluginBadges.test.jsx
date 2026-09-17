@@ -22,6 +22,7 @@ describe('SharedPluginBadges', () => {
     const onPushToHost = vi.fn();
     render(<SharedPluginBadges item={item} missingOnHost={new Set(['afkplus.py'])} onPushToHost={onPushToHost} />);
     expect(screen.getByTestId('plugin-missing-afkplus.py')).toHaveTextContent(/not on host/i);
+    expect(screen.queryByTestId('plugin-shared-afkplus.py')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('plugin-push-afkplus.py'));
     expect(onPushToHost).toHaveBeenCalledTimes(1);
   });

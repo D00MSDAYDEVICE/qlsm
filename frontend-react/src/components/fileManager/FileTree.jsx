@@ -369,7 +369,7 @@ export default function FileTree({
       </div>
       {hostPoolUnavailable && (
         <p className="flex-shrink-0 px-3 py-1 text-[11px] text-[var(--text-muted)]" data-testid="host-pool-unavailable">
-          Host pool status unavailable; &ldquo;not on host&rdquo; badges are hidden.
+          Host pool status unavailable; badges hidden.
         </p>
       )}
     </div>
