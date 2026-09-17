@@ -36,6 +36,10 @@ const FileManager = forwardRef(function FileManager({
   saveBinaryMeta,
   binaryContext = null,
   onEditCvars = null,
+  missingOnHost = undefined,
+  onPushToHost = null,
+  pushingToHost = false,
+  hostPoolUnavailable = false,
 }, ref) {
   const sidebarWidth = useSidebarWidth();
   const controller = useFileManagerController({
@@ -109,6 +113,10 @@ const FileManager = forwardRef(function FileManager({
             onUploadToFolder: controller.handleUploadToFolder,
           }}
           onEditCvars={onEditCvars}
+          missingOnHost={missingOnHost}
+          onPushToHost={onPushToHost}
+          pushingToHost={pushingToHost}
+          hostPoolUnavailable={hostPoolUnavailable}
         />
         <FileSidebarActions
           capabilities={capabilities}

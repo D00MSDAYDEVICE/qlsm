@@ -179,6 +179,37 @@ describe('FileTree', () => {
       expect(screen.getAllByRole('checkbox')).toHaveLength(1);
     });
 
+    it('marks a shared plugin the host does not have yet and wires the push', () => {
+      const onPushToHost = vi.fn();
+      render(
+        <FolderHarness
+          files={[{ name: 'afkplus.py', path: 'afkplus.py', type: 'file', shared: true }]}
+          foldersEnabled
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+          missingOnHost={new Set(['afkplus.py'])}
+          onPushToHost={onPushToHost}
+        />,
+      );
+      expect(screen.getByTestId('plugin-missing-afkplus.py')).toHaveTextContent(/not on host/i);
+      fireEvent.click(screen.getByTestId('plugin-push-afkplus.py'));
+      expect(onPushToHost).toHaveBeenCalled();
+    });
+
+    it('shows a note when host pool status is unavailable', () => {
+      render(
+        <FolderHarness
+          files={[{ name: 'afkplus.py', path: 'afkplus.py', type: 'file', shared: true }]}
+          foldersEnabled
+          capabilities={PLUGIN_CAPS}
+          hostPoolUnavailable
+        />,
+      );
+      expect(screen.getByText(/host pool status unavailable/i)).toBeInTheDocument();
+    });
+
     it('disables rename and delete on a shared plugin row', async () => {
       render(
         <FolderHarness
