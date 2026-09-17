@@ -318,6 +318,41 @@ describe('FileTree', () => {
       expect(screen.getByTestId('plugin-cvars-essentials.py')).toBeInTheDocument();
     });
 
+    it('lists a plugin by filename and puts the manifest label in its tooltip', () => {
+      render(
+        <FolderHarness
+          files={[{
+            name: 'afk.py',
+            path: 'afk.py',
+            type: 'file',
+            plugin_manifest: { label: 'AFK Plus', description: 'Kicks idle players.' },
+          }]}
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+        />,
+      );
+      expect(screen.getByText('afk.py')).toBeInTheDocument();
+      expect(screen.queryByText('AFK Plus')).not.toBeInTheDocument();
+      fireEvent.mouseEnter(screen.getByTestId('plugin-manifest-afk.py'));
+      expect(screen.getByRole('tooltip')).toHaveTextContent('AFK Plus — Kicks idle players.');
+    });
+
+    it('still shows the label tooltip when the manifest has only a label', () => {
+      render(
+        <FolderHarness
+          files={[{ name: 'afk.py', path: 'afk.py', type: 'file', plugin_manifest: { label: 'AFK Plus' } }]}
+          checkable
+          checkedFiles={new Set()}
+          onCheck={vi.fn()}
+          capabilities={PLUGIN_CAPS}
+        />,
+      );
+      fireEvent.mouseEnter(screen.getByTestId('plugin-manifest-afk.py'));
+      expect(screen.getByRole('tooltip')).toHaveTextContent('AFK Plus');
+    });
+
     it('omits the cvars settings button when the manifest has no cvars', () => {
       renderPluginTree();
       expect(screen.queryByTestId('plugin-cvars-essentials.py')).not.toBeInTheDocument();

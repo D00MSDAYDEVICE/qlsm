@@ -188,7 +188,12 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
                         />
                       </td>
                       <td className="users-td">
-                        <div>{plugin.label || plugin.filename}</div>
+                        <div>
+                          {plugin.label || plugin.filename}
+                          {plugin.label && plugin.label !== plugin.filename && (
+                            <span className="ml-2 font-mono text-xs text-[var(--text-muted)]">{plugin.filename}</span>
+                          )}
+                        </div>
                         {plugin.description && (
                           <div className="text-xs text-[var(--text-muted)]">{plugin.description}</div>
                         )}

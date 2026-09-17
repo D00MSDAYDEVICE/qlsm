@@ -17,7 +17,6 @@ import {
   CONFIG_CAPS,
   FACTORY_CAPS,
   FileManager,
-  getPluginDisplayLabel,
   PLUGIN_CAPS,
   PluginCvarsModal,
   useDraftAdapter,
@@ -431,7 +430,7 @@ function AddInstanceForm({
   }, []);
 
   const handleEditPluginCvars = useCallback((item, cvars) => {
-    setCvarsModalTarget({ label: getPluginDisplayLabel(item), cvars });
+    setCvarsModalTarget({ label: item.name, cvars });
   }, []);
 
   const handleSavePluginCvars = useCallback((nextConfig) => {
