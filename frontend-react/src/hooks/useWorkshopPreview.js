@@ -1,26 +1,11 @@
 import { useEffect, useState } from 'react';
-import { getWorkshopPreview } from '../services/api';
+import {
+    fetchWorkshopPreview,
+    getCachedWorkshopPreview,
+    normalizeWorkshopId,
+} from '../utils/workshopPreviewCache';
 
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-const ERROR_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const previewCache = new Map();
-
-const normalizeWorkshopId = (workshopItemId) => {
-    if (workshopItemId === null || workshopItemId === undefined) return null;
-    const value = String(workshopItemId).trim();
-    return /^\d+$/.test(value) ? value : null;
-};
-
-const cacheEntry = (id, previewUrl, ttlMs) => {
-    previewCache.set(id, {
-        previewUrl,
-        expiresAt: Date.now() + ttlMs,
-    });
-};
-
-export const __clearWorkshopPreviewCacheForTests = () => {
-    previewCache.clear();
-};
+export { __clearWorkshopPreviewCacheForTests } from '../utils/workshopPreviewCache';
 
 export function useWorkshopPreview(workshopItemId, enabled = true) {
     const [previewUrl, setPreviewUrl] = useState(null);
@@ -34,8 +19,8 @@ export function useWorkshopPreview(workshopItemId, enabled = true) {
             return;
         }
 
-        const cached = previewCache.get(normalizedId);
-        if (cached && cached.expiresAt > Date.now()) {
+        const cached = getCachedWorkshopPreview(normalizedId);
+        if (cached) {
             setPreviewUrl(cached.previewUrl);
             setLoading(false);
             return;
@@ -43,24 +28,11 @@ export function useWorkshopPreview(workshopItemId, enabled = true) {
 
         let cancelled = false;
         setLoading(true);
-
-        const loadPreview = async () => {
-            try {
-                const result = await getWorkshopPreview(normalizedId);
-                const nextUrl = typeof result?.preview_url === 'string' && result.preview_url.trim()
-                    ? result.preview_url.trim()
-                    : null;
-                cacheEntry(normalizedId, nextUrl, CACHE_TTL_MS);
-                if (!cancelled) setPreviewUrl(nextUrl);
-            } catch {
-                cacheEntry(normalizedId, null, ERROR_CACHE_TTL_MS);
-                if (!cancelled) setPreviewUrl(null);
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        };
-
-        loadPreview();
+        fetchWorkshopPreview(normalizedId).then((preview) => {
+            if (cancelled) return;
+            setPreviewUrl(preview.previewUrl);
+            setLoading(false);
+        });
 
         return () => {
             cancelled = true;
