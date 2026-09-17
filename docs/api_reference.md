@@ -1210,7 +1210,7 @@ External sources of plugins, fetched over HTTP and downloaded into the operator 
 | `/plugin-repositories/` | POST | Add a repository (`name`, `url`) and sync it immediately |
 | `/plugin-repositories/<id>/sync` | POST | Re-fetch `<url>/qlsm-plugins.json` |
 | `/plugin-repositories/<id>` | DELETE | Remove the repository (downloaded files stay) |
-| `/plugin-repositories/<id>/download` | POST | Download `filenames` into the pool; optional `runtimes` ({filename: runtime}) fills in entries that declare none, and `overwrite: true` replaces existing pool files |
+| `/plugin-repositories/<id>/download` | POST | Download `filenames` into the pool; optional `runtimes` ({filename: runtime}) fills in entries that declare none, and `overwrite: true` replaces existing pool files. Each downloaded file's runtime gets a common-pool refresh queued on every Active host of that runtime. |
 | `/plugin-repositories/<id>/diff` | GET | `filename` (and `runtime` when the entry declares none): `{data: {filename, runtime, local, remote}}`, the pool copy and the repository copy as text |
 
 - A `github.com` repository URL is resolved to its `raw.githubusercontent.com` base on add (trying `main`, then `master`, unless the URL names a branch). `url` in responses is what the operator typed; `fetch_url` is what QLSM fetches.
@@ -1218,6 +1218,7 @@ External sources of plugins, fetched over HTTP and downloaded into the operator 
 - Download responses are `{downloaded: [...], errors: [{filename, error, code}]}` with 200 (all fine), 207 (partial), 409 (none, every file already exists) or 422 (none, other failures). A failed sync returns 422. Neither route uses 502, because Cloudflare replaces 502 bodies with its own error page. `code: "exists"` means the pool already has that filename.
 - Diff returns 400 (unsafe filename, no runtime), 404 (unknown repository, file not in the pool) or 422 (repository copy can't be fetched, pool file over the size limit). It never writes anything.
 - A `qlsm-plugins.json` entry may carry `cvars`/`commands` (the `.ql-plugin.json` shape). Download re-fetches the manifest (falling back to the last-synced list) and writes the entry's `label`/`description`/`cvars`/`commands` as the pool's `<plugin>.ql-plugin.json`. A separate `<plugin>.ql-plugin.json` in the repo takes precedence; an inline block over 16 KB is skipped.
+  When `downloaded` is non-empty the body also carries `push: {queued: [{id, name}], skipped: [{id, name, reason}]}`. `reason` is `busy` (another job holds the host lock), `status: <HostStatus>` (host not Active) or `enqueue failed`. Each queued host runs the same job as `POST /hosts/<id>/plugin-updates/apply` with `update_common_pool: true` (see `ui/plugin_push.py`).
 
 ## Cvar Catalog
 
