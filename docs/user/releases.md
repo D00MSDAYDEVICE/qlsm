@@ -6,6 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.39.0` | 2026-09-17 | [#219](https://github.com/dngrtech/qlsm/pull/219) | New installs list the **D00MSDAYDEVICE minqlx** plugin repository under **Settings → Plugin Repositories** out of the box. |
 | `v1.38.0` | 2026-09-17 | [#218](https://github.com/dngrtech/qlsm/pull/218) | Push a downloaded plugin to every active host of its runtime automatically, and mark shared plugins the host does not have yet with a **not on host** badge and a push button in the **Plugins** tab. |
 | `v1.37.1` | 2026-09-16 | [#217](https://github.com/dngrtech/qlsm/pull/217) | Store plugins downloaded from a plugin repository in `data/shared-plugins/<runtime>/` so they reach your hosts and survive updates. Plugins downloaded before this version must be downloaded again. |
 | `v1.37.0` | 2026-09-16 | [#215](https://github.com/dngrtech/qlsm/pull/215) | Pick per file what to overwrite when a plugin download finds an existing file, and compare the server's copy with the repository's side by side first. Also fixes the "502 Bad gateway" error shown behind Cloudflare instead of the overwrite prompt. |
