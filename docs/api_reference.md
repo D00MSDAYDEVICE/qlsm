@@ -669,7 +669,7 @@ lock and return `200` immediately.
     "found": true,
     "preview_url": "https://images.steamusercontent.com/ugc/...",
     "title": "Campgrounds Redux",
-    "description": "Plain-text description, BBCode stripped, max 300 characters",
+    "description": "Plain-text description, BBCode stripped, cut to 300 characters plus an ellipsis",
     "source": "cache"
   }
 }
