@@ -819,3 +819,96 @@ def test_diff_replaces_invalid_utf8(client, app, monkeypatch, tmp_path):
 def test_diff_requires_auth(client, app):
     response = client.get('/api/plugin-repositories/1/diff?filename=balance2.py')
     assert response.status_code == 401
+
+
+# --- auto-push after download ---
+
+def test_download_pushes_pool_to_hosts_of_the_downloaded_runtime(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
+    make_user(app, 'dlpush', 'password123')
+    headers = auth_headers(app, 'dlpush')
+    with app.app_context():
+        repo = _seeded_repo('Repo P', 'https://example.com/p')
+        repo_id = repo.id
+
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None: None,
+    )
+    pushed = []
+    fake_result = {'queued': [{'id': 1, 'name': 'alpha'}], 'skipped': [{'id': 2, 'name': 'beta', 'reason': 'busy'}]}
+    monkeypatch.setattr(
+        plugin_repository_routes, 'push_pool_to_hosts',
+        lambda runtimes: (pushed.append(set(runtimes)), fake_result)[1],
+    )
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py']},
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body['downloaded'] == ['balance2.py']
+    assert body['push'] == fake_result
+    assert pushed == [{'minqlx'}]
+
+
+def test_download_does_not_push_when_nothing_was_downloaded(client, app, monkeypatch):
+    _patch_fetch(monkeypatch, error='offline')
+    make_user(app, 'dlnopush', 'password123')
+    headers = auth_headers(app, 'dlnopush')
+    with app.app_context():
+        repo = _seeded_repo('Repo Q', 'https://example.com/q')
+        repo_id = repo.id
+
+    def failing_download(base_url, filename, runtime, overwrite=False, inline_manifest=None):
+        raise PluginRepositoryError('boom', code='fetch')
+    monkeypatch.setattr(plugin_repository_routes, 'download_plugin', failing_download)
+    called = []
+    monkeypatch.setattr(plugin_repository_routes, 'push_pool_to_hosts', lambda runtimes: called.append(runtimes))
+
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py']},
+    )
+    assert response.status_code == 422
+    assert 'push' not in response.get_json()
+    assert called == []
+
+
+def test_download_still_succeeds_when_the_push_cannot_take_the_host_lock(client, app, monkeypatch):
+    """Redis down used to make the whole download 500 even though the files had
+    already landed in the pool, and the retry then hit the overwrite prompt."""
+    from ui.models import Host, HostStatus
+    _patch_fetch(monkeypatch, error='offline')
+    make_user(app, 'dllock', 'password123')
+    headers = auth_headers(app, 'dllock')
+    with app.app_context():
+        repo = _seeded_repo('Repo R', 'https://example.com/r')
+        repo_id = repo.id
+        host = Host(name='redis-down', provider='standalone', ip_address='10.0.0.9',
+                    runtime='minqlx', status=HostStatus.ACTIVE)
+        db.session.add(host)
+        db.session.commit()
+        host_id = host.id
+
+    monkeypatch.setattr(
+        plugin_repository_routes, 'download_plugin',
+        lambda base_url, filename, runtime, overwrite=False, inline_manifest=None: None,
+    )
+    import ui.plugin_push as plugin_push
+
+    def dead_redis(*args, **kwargs):
+        raise RuntimeError('Error 111 connecting to redis:6379. Connection refused.')
+    monkeypatch.setattr(plugin_push, 'acquire_lock', dead_redis)
+
+    response = client.post(
+        f'/api/plugin-repositories/{repo_id}/download', headers=headers,
+        json={'filenames': ['balance2.py']},
+    )
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body['downloaded'] == ['balance2.py']
+    assert body['push']['queued'] == []
+    assert body['push']['skipped'] == [
+        {'id': host_id, 'name': 'redis-down', 'reason': 'lock unavailable'}
+    ]

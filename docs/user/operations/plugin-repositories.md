@@ -58,6 +58,8 @@ Inline `cvars`/`commands` need QLSM 1.36.0 or newer. Older versions ignore them.
 
 ## Use A Downloaded Plugin
 
-1. Run [Check for Updates](check-for-updates.md) on each host that should have the plugin. This copies it onto the host.
-2. Open the instance's config (or **Deploy A New Instance**) and go to the **Plugins** tab. The plugin appears as a **shared** row (see [Shared Plugins](edit-configs.md#shared-plugins)).
-3. Tick it and save.
+Downloading a plugin also pushes QLSM's shared plugin folder to every **Active** host that runs the plugin's runtime. The success message names the hosts. A host that is busy with another job, or not Active, is listed as skipped; run [Check for Updates](check-for-updates.md) on it later, or use the push button described below.
+
+1. Open the instance's config (or **Deploy A New Instance**) and go to the **Plugins** tab. The plugin is listed with the other shared plugins (see [Shared Plugins](edit-configs.md#shared-plugins)), marked **shared** once the host has it.
+2. If the row shows **not on host** instead, the host has not received the file yet. Click the upload icon next to it to push the shared folder to that host, and wait for the badge to clear.
+3. Tick the plugin and save. Restart the instance to load it.

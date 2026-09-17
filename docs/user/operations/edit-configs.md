@@ -168,7 +168,7 @@ The `Plugins` tab manages Python plugins for this instance:
 The list also includes plugins from QLSM's shared plugin folder for the host's runtime that this instance or preset doesn't have its own copy of. That folder is the plugins QLSM ships with, plus anything in `data/shared-plugins/minqlx/` or `data/shared-plugins/minqlxtended/` under your QLSM install (a downloaded plugin with the same name as a built-in one takes its place). They're marked **shared**. That covers plugins you download from a [plugin repository](plugin-repositories.md).
 
 - Tick a shared plugin like any other. Deploying copies it from the host's shared folder into the instance.
-- A new shared plugin must reach the host first: run [Check for Updates](check-for-updates.md) on the host after downloading it. Otherwise the server can't find it when it starts.
+- A shared plugin must be on the host before you enable it. A row marked **not on host** in place of **shared** is not there yet: click the upload icon next to it to push QLSM's shared folder to the host, or run [Check for Updates](check-for-updates.md). The badge clears once the host has the file. If the host is not Active or cannot be reached, the tab says "Host pool status unavailable" and shows no badges.
 - Shared plugins can't be renamed or deleted here, but you can view their code.
 - Editing a shared plugin's code saves a copy into this instance or preset. The row then loses its **shared** mark, and this configuration keeps its own copy instead of receiving updates to the shared one.
 - When the instance or preset has its own file with the same name, only that copy is listed.

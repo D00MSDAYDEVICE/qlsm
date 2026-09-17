@@ -8,6 +8,7 @@ from flask_jwt_extended import jwt_required
 from ui import db
 from ui.models import PluginRepository
 from ui.plugin_pool import resolve_pool_file
+from ui.plugin_push import push_pool_to_hosts
 from ui.plugin_repositories import (
     PLUGIN_FILE_MAX_SIZE,
     PluginRepositoryError,
@@ -212,7 +213,11 @@ def download_plugin_repository_plugins(repo_id):
     failed fetch) falls back to the last-synced entry.
 
     `overwrite: true` in the body is required to replace a pool file that
-    already exists -- see download_plugin()."""
+    already exists -- see download_plugin().
+
+    When at least one file landed, every ACTIVE host of that file's runtime
+    gets a common-pool refresh job queued (`push` in the response lists
+    queued and skipped hosts)."""
     repo = db.session.get(PluginRepository, repo_id)
     if not repo:
         return jsonify({'error': {'message': 'Repository not found.'}}), 404
@@ -245,6 +250,7 @@ def download_plugin_repository_plugins(repo_id):
         fresh_by_filename = {}
 
     downloaded, errors = [], []
+    downloaded_runtimes = set()
     for filename in data['filenames']:
         if not isinstance(filename, str):
             errors.append({'filename': filename, 'error': 'Not a string.'})
@@ -263,6 +269,7 @@ def download_plugin_repository_plugins(repo_id):
                 inline_manifest=build_inline_manifest(fresh_by_filename.get(filename) or entry),
             )
             downloaded.append(filename)
+            downloaded_runtimes.add(runtime)
         except PluginRepositoryError as e:
             errors.append({'filename': filename, 'error': str(e), 'code': e.code})
 
@@ -275,13 +282,19 @@ def download_plugin_repository_plugins(repo_id):
             f"into the local pool (overwrite={overwrite}): {', '.join(downloaded)}"
         )
 
+    body = {'downloaded': downloaded, 'errors': errors}
     if downloaded:
+        # A file in the pool is invisible to a host until its common pool is
+        # refreshed, so push right away to every ACTIVE host of that runtime.
+        # Hosts that can't take the job now come back as skipped; the UI
+        # tells the operator to run Check for Updates on those later.
+        body['push'] = push_pool_to_hosts(downloaded_runtimes)
         status = 207 if errors else 200
     elif all(e.get('code') == 'exists' for e in errors):
         status = 409  # the UI turns this body into an overwrite prompt
     else:
         status = 422
-    return jsonify({'downloaded': downloaded, 'errors': errors}), status
+    return jsonify(body), status
 
 
 @plugin_repository_api_bp.route('/<int:repo_id>/diff', methods=['GET'])

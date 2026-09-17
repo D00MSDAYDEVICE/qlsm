@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Box, Code, FileText, Folder, FolderOpen, Lock, Search, Settings, Type } from 'lucide-react';
 
 import FileTreeRowMenu from './FileTreeRowMenu';
+import SharedPluginBadges from './SharedPluginBadges';
 import InfoTooltip from '../common/InfoTooltip';
 import { getFileType, sortFileTree, MAX_CONFIG_FOLDER_DEPTH } from './fileManagerUtils';
 import {
@@ -19,8 +20,6 @@ const FILE_TYPE_ICONS = {
   binary: Box,
   font: Type,
 };
-
-const SHARED_PLUGIN_TITLE = "From the shared plugin folder. Editing it saves a copy for this configuration.";
 
 const FILE_TYPE_COLORS = {
   python: 'text-blue-400',
@@ -60,6 +59,9 @@ function TreeItem({
   rowMenuHandlers,
   onEditCvars,
   libraryNames,
+  missingOnHost,
+  onPushToHost,
+  pushingToHost,
 }) {
   const expanded = item.type === 'folder' ? expandedFolders.has(item.path) : false;
   const isFolder = item.type === 'folder';
@@ -194,15 +196,12 @@ function TreeItem({
         {/* Trailing cluster, in a fixed order: badge, cvars gear, row menu. The
             badge sits outside the name button so it lands at the same offset on
             every row rather than being pushed around by the name's width. */}
-        {item.shared && (
-          <span
-            className="flex-shrink-0 rounded border border-[var(--surface-border)] px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]"
-            title={SHARED_PLUGIN_TITLE}
-            data-testid={`plugin-shared-${item.path}`}
-          >
-            shared
-          </span>
-        )}
+        <SharedPluginBadges
+          item={item}
+          missingOnHost={missingOnHost}
+          onPushToHost={onPushToHost}
+          pushingToHost={pushingToHost}
+        />
         {/* The gear keeps its slot even on rows with no cvars, so a row that has
             one doesn't shove the badge left of where it sits on every other row.
             Only in the Plugins tab, where a gear can appear at all. */}
@@ -254,6 +253,9 @@ function TreeItem({
           rowMenuHandlers={rowMenuHandlers}
           onEditCvars={onEditCvars}
           libraryNames={libraryNames}
+          missingOnHost={missingOnHost}
+          onPushToHost={onPushToHost}
+          pushingToHost={pushingToHost}
         />
       ))}
     </>
@@ -273,6 +275,10 @@ export default function FileTree({
   onToggleFolder = () => {},
   rowMenuHandlers = {},
   onEditCvars = null,
+  missingOnHost = new Set(),
+  onPushToHost = null,
+  pushingToHost = false,
+  hostPoolUnavailable = false,
 }) {
   const [search, setSearch] = useState('');
   const libraryNames = useMemo(() => collectDependencyFilenames(files || []), [files]);
@@ -355,9 +361,17 @@ export default function FileTree({
             rowMenuHandlers={rowMenuHandlers}
             onEditCvars={onEditCvars}
             libraryNames={libraryNames}
+            missingOnHost={missingOnHost}
+            onPushToHost={onPushToHost}
+            pushingToHost={pushingToHost}
           />
         ))}
       </div>
+      {hostPoolUnavailable && (
+        <p className="flex-shrink-0 px-3 py-1 text-[11px] text-[var(--text-muted)]" data-testid="host-pool-unavailable">
+          Host pool status unavailable; badges hidden.
+        </p>
+      )}
     </div>
   );
 }

@@ -11,6 +11,8 @@ import PresetManagerModal from '../presetManager/PresetManagerModal';
 import InfoTooltip from '../common/InfoTooltip';
 import FullScreenConfigEditorModal from '../config/FullScreenConfigEditorModal';
 import SubfolderPluginNotice from '../fileManager/SubfolderPluginNotice';
+import { useNotification } from '../NotificationProvider';
+import { useHostPoolStatus } from '../../hooks/useHostPoolStatus';
 import {
   CONFIG_CAPS,
   FACTORY_CAPS,
@@ -312,6 +314,11 @@ function AddInstanceForm({
   const selectedHost = (initialData.hosts || []).find((host) => String(host.id) === String(effectiveHostId));
   const selectedHostOsType = selectedHost?.os_type ?? null;
   const hasSelectedHost = Boolean(selectedHost);
+  const { showError } = useNotification();
+  const hostPool = useHostPoolStatus(
+    effectiveHostId ? Number(effectiveHostId) : null,
+    { enabled: activeMainTab === 'scripts' && hasSelectedHost, showError },
+  );
   const selectedHostShape = {
     os_type: selectedHostOsType,
     lan_rate_uses_hook: selectedHost?.lan_rate_uses_hook ?? false,
@@ -1384,6 +1391,10 @@ function AddInstanceForm({
                     contextKey: draftPreset || 'default',
                   }}
                   onEditCvars={handleEditPluginCvars}
+                  missingOnHost={hostPool.missing}
+                  onPushToHost={hostPool.push}
+                  pushingToHost={hostPool.pushing}
+                  hostPoolUnavailable={hostPool.state === 'unavailable'}
                 />
               </div>
             </div>
