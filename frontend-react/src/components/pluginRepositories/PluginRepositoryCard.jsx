@@ -38,7 +38,15 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
     const downloaded = result.downloaded || [];
     const errors = result.errors || [];
     if (downloaded.length) {
-      showSuccess(`Downloaded ${downloaded.length} plugin(s) into the local pool.`);
+      const push = result.push || { queued: [], skipped: [] };
+      const queuedNames = (push.queued || []).map(h => h.name);
+      showSuccess(queuedNames.length
+        ? `Downloaded ${downloaded.length} plugin(s). Pushing to ${queuedNames.join(', ')}.`
+        : `Downloaded ${downloaded.length} plugin(s). No active host to push to.`);
+      const skipped = push.skipped || [];
+      if (skipped.length) {
+        showError(`Not pushed to ${skipped.map(h => `${h.name} (${h.reason})`).join(', ')}. Run Check for Updates on those hosts later.`);
+      }
     }
     const existing = errors.filter(e => e.code === 'exists');
     const otherErrors = errors.filter(e => e.code !== 'exists');
@@ -175,6 +183,7 @@ function PluginRepositoryCard({ repo, onSync, onDelete, onDownloaded, syncing })
                           type="checkbox"
                           checked={checked.has(plugin.filename)}
                           onChange={() => toggle(plugin.filename)}
+                          aria-label={plugin.label || plugin.filename}
                           className="h-3.5 w-3.5 rounded border-gray-500 text-blue-500 focus:ring-blue-500"
                         />
                       </td>
