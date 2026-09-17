@@ -64,6 +64,14 @@
         recursive: yes
         rsync_path: "sudo -u ql rsync"
         delete: yes
+        # Plugins write data next to their .py files (logs, pattern lists,
+        # state); --delete must not wipe it. Filter rules use rsync's
+        # underscore form because synchronize joins rsync_opts with spaces.
+        rsync_opts:
+          - "--filter=P_*.log"
+          - "--filter=P_*.txt"
+          - "--filter=P_*.json"
+          - "--filter=P_*.db"
       delegate_to: localhost
       become: false
 
