@@ -12,7 +12,7 @@ import {
   isEnableablePluginPath,
   PLUGIN_HINT_TEXT,
 } from './pluginSelection';
-import { formatPluginCommandsText, getPluginCvars, getPluginDescription, getPluginDisplayLabel } from './pluginManifest';
+import { formatPluginCommandsText, getPluginCvars, getPluginDescription, getPluginLabel } from './pluginManifest';
 
 const FILE_TYPE_ICONS = {
   python: Code,
@@ -80,15 +80,16 @@ function TreeItem({
     : null;
   // rootOnlyCheckable is plugin-tab-exclusive (see capabilities.js PLUGIN_CAPS) —
   // safe signal to only enrich rows there, never Config/Factories tabs.
-  const displayLabel = !isFolder && rootOnly ? getPluginDisplayLabel(item) : item.name;
   const manifestDescription = !isFolder && rootOnly ? (() => {
     // InfoTooltip's bubble is white-space: normal (shared component, other
     // callers rely on that), so a literal \n here would just collapse to a
     // space — join with punctuation instead of relying on a line break.
+    const label = getPluginLabel(item);
     const description = getPluginDescription(item);
     const commandsText = formatPluginCommandsText(item);
-    if (description && commandsText) return `${description} Commands: ${commandsText}`;
-    return description || (commandsText ? `Commands: ${commandsText}` : null);
+    const body = [description, commandsText && `Commands: ${commandsText}`].filter(Boolean).join(' ');
+    if (!body) return null;
+    return label ? `${label} — ${body}` : body;
   })() : null;
   const pluginCvars = !isFolder && rootOnly && onEditCvars ? getPluginCvars(item) : [];
   // One hint per open folder, next to its name, instead of one per child row.
@@ -167,7 +168,7 @@ function TreeItem({
           <Icon className={`w-4 h-4 flex-shrink-0 ${iconColor}`} />
           {/* No flex-1: the label shrinks to its text so the manifest tooltip sits
               right after the filename instead of being pushed out to the badge. */}
-          <span className="truncate min-w-0">{displayLabel}</span>
+          <span className="truncate min-w-0">{item.name}</span>
           {manifestDescription && (
             <InfoTooltip
               text={manifestDescription}
