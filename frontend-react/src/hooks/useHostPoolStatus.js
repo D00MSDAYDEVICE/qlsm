@@ -13,6 +13,12 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
   const [state, setState] = useState('idle');
   const [pushing, setPushing] = useState(false);
   const pollRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!hostId) return new Set();
@@ -20,10 +26,12 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
       const response = await checkPluginUpdates(hostId);
       const changes = response?.data?.common_pool_changes || [];
       const next = new Set(changes.filter(c => c.change === 'added').map(c => c.name));
+      if (!mountedRef.current) return next;
       setMissing(next);
       setState('ready');
       return next;
     } catch {
+      if (!mountedRef.current) return null;
       setMissing(new Set());
       setState('unavailable');
       return null;
@@ -48,7 +56,7 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
       clearTimeout(pollRef.current.timeout);
       pollRef.current = null;
     }
-    setPushing(false);
+    if (mountedRef.current) setPushing(false);
   }, []);
 
   useEffect(() => () => {
@@ -64,9 +72,12 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
     try {
       await applyPluginUpdates(hostId, { update_common_pool: true, instances: {}, restart_instances: [] });
     } catch (err) {
-      showError?.(err?.error?.message || err?.message || 'Failed to push the plugin pool to the host.');
+      if (mountedRef.current) {
+        showError?.(err?.error?.message || err?.message || 'Failed to push the plugin pool to the host.');
+      }
       return;
     }
+    if (!mountedRef.current) return;
     setPushing(true);
     const interval = setInterval(async () => {
       const next = await refresh();

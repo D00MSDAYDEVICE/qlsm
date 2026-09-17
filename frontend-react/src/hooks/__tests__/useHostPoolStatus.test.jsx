@@ -86,6 +86,34 @@ describe('useHostPoolStatus', () => {
     expect(result.current.missing.has('afkplus.py')).toBe(true);
   });
 
+  it('does not update state after unmount when a poll tick is still in flight', async () => {
+    vi.useFakeTimers();
+    checkPluginUpdates.mockResolvedValueOnce(check([{ name: 'afkplus.py', change: 'added' }]));
+    applyPluginUpdates.mockResolvedValue({});
+
+    const { result, unmount } = renderHook(() => useHostPoolStatus(5, { enabled: true, showError }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await act(async () => { await result.current.push(); });
+
+    let resolvePoll;
+    checkPluginUpdates.mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }));
+    const callsBeforeUnmount = checkPluginUpdates.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(checkPluginUpdates.mock.calls.length).toBe(callsBeforeUnmount + 1);
+
+    unmount();
+
+    // Resolve the in-flight poll tick's request after unmount, and let any
+    // continuation run; it must not call setState (React would warn) or
+    // schedule another poll.
+    await act(async () => {
+      resolvePoll(check([]));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(checkPluginUpdates.mock.calls.length).toBe(callsBeforeUnmount + 1);
+  });
+
   it('push surfaces a server error and does not start polling', async () => {
     checkPluginUpdates.mockResolvedValue(check([{ name: 'afkplus.py', change: 'added' }]));
     applyPluginUpdates.mockRejectedValue({ error: { message: 'Another operation is running on host "x".' } });
