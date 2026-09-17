@@ -88,8 +88,8 @@ function TreeItem({
     const description = getPluginDescription(item);
     const commandsText = formatPluginCommandsText(item);
     const body = [description, commandsText && `Commands: ${commandsText}`].filter(Boolean).join(' ');
-    if (!body) return null;
-    return label ? `${label} — ${body}` : body;
+    if (label && body) return `${label} — ${body}`;
+    return label || body || null;
   })() : null;
   const pluginCvars = !isFolder && rootOnly && onEditCvars ? getPluginCvars(item) : [];
   // One hint per open folder, next to its name, instead of one per child row.
