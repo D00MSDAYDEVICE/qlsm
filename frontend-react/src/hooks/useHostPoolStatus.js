@@ -14,6 +14,7 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
   const [pushing, setPushing] = useState(false);
   const pollRef = useRef(null);
   const mountedRef = useRef(true);
+  const inflightRef = useRef(false);
   // Every refresh() takes the next generation and only writes state if it is
   // still the newest one for the host it was started for. A check runs a
   // synchronous SSH command and can take seconds, so switching hosts mid-check
@@ -91,19 +92,25 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
   useEffect(() => () => stopPolling(), [hostId, stopPolling]);
 
   const push = useCallback(async () => {
-    if (!hostId || pushing) return;
+    // inflightRef, not `pushing`: state only updates after the apply call
+    // returns, so a second click during that round-trip would fire again.
+    if (!hostId || inflightRef.current) return;
+    inflightRef.current = true;
     const wanted = new Set(missing);
     const pushHostId = hostId;
+    setPushing(true);
     try {
       await applyPluginUpdates(hostId, { update_common_pool: true, instances: {}, restart_instances: [] });
     } catch (err) {
+      inflightRef.current = false;
       if (mountedRef.current) {
         showError?.(err?.error?.message || err?.message || 'Failed to push the plugin pool to the host.');
+        setPushing(false);
       }
       return;
     }
+    inflightRef.current = false;
     if (!mountedRef.current) return;
-    setPushing(true);
     // Self-scheduling chain rather than setInterval: the next check is only
     // queued once the previous one has come back. Each check is a blocking SSH
     // call on the server, and the push is exactly when the host is busy, so a
@@ -123,7 +130,7 @@ export function useHostPoolStatus(hostId, { enabled = false, showError } = {}) {
       tick: setTimeout(tick, POOL_POLL_INTERVAL_MS),
       deadline: setTimeout(stopPolling, POOL_POLL_TIMEOUT_MS),
     };
-  }, [hostId, pushing, missing, refresh, showError, stopPolling]);
+  }, [hostId, missing, refresh, showError, stopPolling]);
 
   return { missing, state, pushing, push, refresh };
 }

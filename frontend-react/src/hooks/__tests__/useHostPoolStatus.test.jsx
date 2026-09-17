@@ -251,4 +251,20 @@ describe('useHostPoolStatus', () => {
     expect(showError).toHaveBeenCalledWith('Another operation is running on host "x".');
     expect(result.current.pushing).toBe(false);
   });
+  it('ignores a second click while the apply request is still in flight', async () => {
+    checkPluginUpdates.mockResolvedValue(check([{ name: 'afkplus.py', change: 'added' }]));
+    let resolveApply;
+    applyPluginUpdates.mockImplementationOnce(() => new Promise((resolve) => { resolveApply = resolve; }));
+    const { result } = renderHook(() => useHostPoolStatus(5, { enabled: true, showError }));
+    await waitFor(() => expect(result.current.state).toBe('ready'));
+
+    let first;
+    act(() => { first = result.current.push(); });
+    await waitFor(() => expect(result.current.pushing).toBe(true));
+    await act(async () => { await result.current.push(); });
+    expect(applyPluginUpdates).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveApply({}); await first; });
+    expect(result.current.pushing).toBe(true);
+  });
 });
