@@ -24,6 +24,8 @@ import {
 } from '../codemirror-lang-qlaccess';
 import { qlcfgLanguage, qlCfgCompletion } from '../codemirror-lang-qlcfg';
 import { qlFactoriesLanguage, qlFactoriesCompletion } from '../codemirror-lang-qlfactories';
+import { qlworkshopLanguage } from '../codemirror-lang-qlworkshop';
+import { workshopHoverTooltip } from '../codemirror-workshop-hover';
 
 import { chatLogLanguage, chatDarkHighlighting, chatLightHighlighting } from '../utils/chatLogLanguage';
 import { minqlxLogLanguage, minqlxDarkHighlighting, minqlxLightHighlighting } from '../utils/minqlxLogLanguage';
@@ -95,6 +97,11 @@ const getExtensions = (currentLanguage, currentLinterSource, onChangeCallback, i
     // the "cvars" block
     if (currentLanguage === qlFactoriesLanguage) {
       baseExtensions.push(qlFactoriesCompletion);
+    }
+
+    // Hovering a Workshop ID in workshop.txt previews the Steam item
+    if (currentLanguage === qlworkshopLanguage) {
+      baseExtensions.push(workshopHoverTooltip);
     }
 
 

@@ -642,7 +642,7 @@ lock and return `200` immediately.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/server-status` | GET | Live status map keyed by instance ID |
-| `/server-status/workshop-preview/<workshop_id>` | GET | Resolve Steam workshop preview URL (cached) |
+| `/server-status/workshop-preview/<workshop_id>` | GET | Resolve Steam workshop item preview (thumbnail, title, description; cached) |
 
 ### Server Status Response
 ```json
@@ -666,11 +666,15 @@ lock and return `200` immediately.
 {
   "data": {
     "workshop_id": "2358556636",
+    "found": true,
     "preview_url": "https://images.steamusercontent.com/ugc/...",
+    "title": "Campgrounds Redux",
+    "description": "Plain-text description, BBCode stripped, cut to 300 characters plus an ellipsis",
     "source": "cache"
   }
 }
 ```
+Unknown items and Steam failures return "found": false with null fields (cached for 30 minutes).
 
 ## Draft Workspaces
 

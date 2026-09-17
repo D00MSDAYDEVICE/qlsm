@@ -21,10 +21,36 @@ STEAM_PUBLISHED_FILE_DETAILS_URL = (
     'https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/'
 )
 WORKSHOP_PREVIEW_RATE_LIMIT = '30 per minute'
+WORKSHOP_DESCRIPTION_MAX_CHARS = 300
+_BBCODE_TAG_RE = re.compile(r'\[/?[a-zA-Z0-9*]+(?:=[^\]]*)?\]')
+_WHITESPACE_RE = re.compile(r'\s+')
+
+
+def _clean_text(value):
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _clean_description(raw):
+    """Steam descriptions are BBCode; reduce to a short plain-text snippet."""
+    if not isinstance(raw, str):
+        return None
+    text = _WHITESPACE_RE.sub(' ', _BBCODE_TAG_RE.sub(' ', raw)).strip()
+    if not text:
+        return None
+    if len(text) > WORKSHOP_DESCRIPTION_MAX_CHARS:
+        text = text[:WORKSHOP_DESCRIPTION_MAX_CHARS].rstrip() + '…'
+    return text
 
 
 def _read_workshop_preview_cache(redis_client, cache_key):
-    """Return (found, preview_url_or_none) for workshop preview cache."""
+    """Return (found, details_or_none) for the workshop preview cache.
+
+    Values written before titles were cached are bare URL strings; they are
+    treated as a miss so the item is fetched again with its title.
+    """
     if redis_client is None:
         return False, None
 
@@ -34,20 +60,29 @@ def _read_workshop_preview_cache(redis_client, cache_key):
             return False, None
         if raw == WORKSHOP_PREVIEW_NONE_SENTINEL:
             return True, None
-        return True, raw
+        details = json.loads(raw)
+        if not isinstance(details, dict):
+            return False, None
+        return True, {
+            'preview_url': details.get('preview_url'),
+            'title': details.get('title'),
+            'description': details.get('description'),
+        }
+    except (TypeError, ValueError):
+        return False, None
     except Exception as e:
         logger.warning(f"Error reading workshop preview cache key {cache_key}: {e}")
         return False, None
 
 
-def _write_workshop_preview_cache(redis_client, cache_key, preview_url):
+def _write_workshop_preview_cache(redis_client, cache_key, details):
     """Write workshop preview cache. Caches misses with shorter TTL."""
     if redis_client is None:
         return
 
     try:
-        if preview_url:
-            redis_client.setex(cache_key, WORKSHOP_PREVIEW_CACHE_TTL, preview_url)
+        if details:
+            redis_client.setex(cache_key, WORKSHOP_PREVIEW_CACHE_TTL, json.dumps(details))
         else:
             redis_client.setex(
                 cache_key,
@@ -58,8 +93,11 @@ def _write_workshop_preview_cache(redis_client, cache_key, preview_url):
         logger.warning(f"Error writing workshop preview cache key {cache_key}: {e}")
 
 
-def _fetch_preview_url_from_steam(workshop_id):
-    """Fetch preview_url for a workshop item. Returns None on any failure."""
+def _fetch_workshop_details_from_steam(workshop_id):
+    """Fetch preview_url/title/description for a workshop item.
+
+    Returns None when the item does not exist or on any failure.
+    """
     try:
         response = requests.post(
             STEAM_PUBLISHED_FILE_DETAILS_URL,
@@ -72,18 +110,39 @@ def _fetch_preview_url_from_steam(workshop_id):
         response.raise_for_status()
 
         payload = response.json() or {}
-        details = payload.get('response', {}).get('publishedfiledetails', [])
-        if not details:
+        items = payload.get('response', {}).get('publishedfiledetails', [])
+        if not items:
             return None
 
-        preview_url = details[0].get('preview_url')
-        if not isinstance(preview_url, str):
+        item = items[0]
+        # Steam reports result 9 (and no title) for unknown ids
+        if item.get('result', 1) != 1:
             return None
-        preview_url = preview_url.strip()
-        return preview_url or None
+        details = {
+            'preview_url': _clean_text(item.get('preview_url')),
+            'title': _clean_text(item.get('title')),
+            'description': _clean_description(item.get('description')),
+        }
+        if not details['preview_url'] and not details['title']:
+            return None
+        return details
     except Exception as e:
         logger.warning(f"Error fetching workshop preview for {workshop_id}: {e}")
         return None
+
+
+def _workshop_preview_response(workshop_id, details, source):
+    details = details or {}
+    return jsonify({
+        "data": {
+            "workshop_id": workshop_id,
+            "found": bool(details),
+            "preview_url": details.get('preview_url'),
+            "title": details.get('title'),
+            "description": details.get('description'),
+            "source": source,
+        }
+    })
 
 
 @server_status_bp.route('', methods=['GET'])
@@ -117,7 +176,7 @@ def get_server_status():
 @limiter.limit(WORKSHOP_PREVIEW_RATE_LIMIT)
 @jwt_required()
 def get_workshop_preview(workshop_id):
-    """Return preview URL for a workshop item with Redis-backed caching."""
+    """Return preview URL, title and description for a workshop item (Redis cached)."""
     workshop_id = str(workshop_id).strip()
     if not re.fullmatch(r'\d+', workshop_id):
         return jsonify({"error": {"message": "workshop_id must be numeric"}}), 400
@@ -125,22 +184,10 @@ def get_workshop_preview(workshop_id):
     redis_client = current_app.extensions.get('redis')
     cache_key = f'{WORKSHOP_PREVIEW_CACHE_KEY_PREFIX}:{workshop_id}'
 
-    found, preview_url = _read_workshop_preview_cache(redis_client, cache_key)
+    found, details = _read_workshop_preview_cache(redis_client, cache_key)
     if found:
-        return jsonify({
-            "data": {
-                "workshop_id": workshop_id,
-                "preview_url": preview_url,
-                "source": "cache",
-            }
-        })
+        return _workshop_preview_response(workshop_id, details, 'cache')
 
-    preview_url = _fetch_preview_url_from_steam(workshop_id)
-    _write_workshop_preview_cache(redis_client, cache_key, preview_url)
-    return jsonify({
-        "data": {
-            "workshop_id": workshop_id,
-            "preview_url": preview_url,
-            "source": "steam",
-        }
-    })
+    details = _fetch_workshop_details_from_steam(workshop_id)
+    _write_workshop_preview_cache(redis_client, cache_key, details)
+    return _workshop_preview_response(workshop_id, details, 'steam')
