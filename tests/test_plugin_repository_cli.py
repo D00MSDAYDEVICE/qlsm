@@ -1,6 +1,7 @@
 from ui import db
 from ui.models import PluginRepository
 import ui.routes.plugin_repository_routes as plugin_repository_routes
+from ui.plugin_repository_cli import DEFAULT_PLUGIN_REPOSITORIES
 from ui.plugin_repositories import PluginRepositoryError
 
 GITHUB_URL = 'https://github.com/D00MSDAYDEVICE/minqlx'
@@ -26,7 +27,7 @@ def test_seed_adds_default_repository_resolved_to_raw(runner, app, monkeypatch):
     result = runner.invoke(args=['seed-plugin-repositories'])
 
     assert result.exit_code == 0
-    assert 'D00MSDAYDEVICE minqlx' in result.output
+    assert DEFAULT_PLUGIN_REPOSITORIES[0][0] in result.output
     with app.app_context():
         repo = PluginRepository.query.one()
         assert repo.url == RAW_MAIN
