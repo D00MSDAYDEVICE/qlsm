@@ -19,6 +19,7 @@ import {
   toQlxPluginNames,
 } from '../fileManager/pluginSelection';
 import { useNotification } from '../NotificationProvider';
+import { useHostPoolStatus } from '../../hooks/useHostPoolStatus';
 import { useCvarAutocomplete } from '../../hooks/useCvarAutocomplete';
 import InfoTooltip from '../common/InfoTooltip';
 import { qlcfgLanguage, createQlCfgLinter, stripManagedCvars } from '../../codemirror-lang-qlcfg';
@@ -107,6 +108,7 @@ function EditInstanceConfigModal({
   const [hostOsType, setHostOsType] = useState(null);
   const [hostLanRateUsesHook, setHostLanRateUsesHook] = useState(false);
   const [hostRuntime, setHostRuntime] = useState('minqlx');
+  const [hostId, setHostId] = useState(null);
 
   // Restart on Save state
   const [restartAfterSave, setRestartAfterSave] = useState(true);
@@ -188,6 +190,7 @@ function EditInstanceConfigModal({
   });
 
   const { showSuccess, showError } = useNotification(); // Get notification functions
+  const hostPool = useHostPoolStatus(hostId, { enabled: activeMainTab === 'scripts', showError });
 
   const pluginsAdapter = useDraftAdapter({
     source: draftPreset ? 'preset' : 'instance',
@@ -426,6 +429,7 @@ function EditInstanceConfigModal({
           setHostOsType(instanceDetails.host_os_type || null);
           setHostLanRateUsesHook(instanceDetails.host_lan_rate_uses_hook === true);
           setHostRuntime(instanceDetails.host_runtime || 'minqlx');
+          setHostId(instanceDetails.host_id ?? null);
           setInstanceStatus(instanceDetails.status || null);
           const incomingFolders = Array.isArray(configData?.config_folders)
             ? configData.config_folders
@@ -1243,6 +1247,10 @@ function EditInstanceConfigModal({
                                   contextKey: String(instanceId),
                                 }}
                                 onEditCvars={handleEditPluginCvars}
+                                missingOnHost={hostPool.missing}
+                                onPushToHost={hostPool.push}
+                                pushingToHost={hostPool.pushing}
+                                hostPoolUnavailable={hostPool.state === 'unavailable'}
                               />
                             </div>
                           </div>

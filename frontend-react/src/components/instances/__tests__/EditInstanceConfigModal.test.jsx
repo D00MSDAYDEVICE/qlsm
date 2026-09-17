@@ -63,6 +63,8 @@ vi.mock('../../../services/api', () => ({
   updateInstance: mocks.updateInstance,
   updateInstanceConfig: mocks.updateInstanceConfig,
   updatePreset: mocks.updatePreset,
+  checkPluginUpdates: vi.fn().mockRejectedValue(new Error('offline')),
+  applyPluginUpdates: vi.fn(),
 }));
 
 vi.mock('../../../services/draftApi', () => ({

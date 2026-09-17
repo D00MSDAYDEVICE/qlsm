@@ -57,6 +57,15 @@ vi.mock('../../../services/api', () => ({
   getPresets: mocks.getPresets,
   savePreset: mocks.savePreset,
   updatePreset: mocks.updatePreset,
+  checkPluginUpdates: vi.fn().mockRejectedValue(new Error('offline')),
+  applyPluginUpdates: vi.fn(),
+}));
+
+vi.mock('../../NotificationProvider', () => ({
+  useNotification: () => ({
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
+  }),
 }));
 
 vi.mock('../../../services/draftApi', () => ({
