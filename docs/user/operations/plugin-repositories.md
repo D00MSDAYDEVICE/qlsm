@@ -2,6 +2,8 @@
 
 **Settings → Plugin Repositories** lets you add third-party plugin sources and download their plugins into QLSM's shared plugin folder.
 
+A new QLSM install already lists one repository, **Doomsday's Plugins Repository** (`https://github.com/D00MSDAYDEVICE/minqlx`). None of its plugins are downloaded until you pick them. You can delete it; it won't come back when QLSM restarts or updates.
+
 ## Add A Repository
 
 1. Click **Add Repository** and enter a name and the repository's URL.

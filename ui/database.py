@@ -21,12 +21,14 @@ def init_db_command():
 
 def register_db_commands(app):
     """Register database CLI commands with the app."""
+    from ui.plugin_repository_cli import register_plugin_repository_commands
     from ui.preset_cli import register_preset_commands
     from ui.user_cli import register_user_commands
 
     app.cli.add_command(init_db_command)
     register_preset_commands(app)
     register_user_commands(app)
+    register_plugin_repository_commands(app)
 
 # --- Instance Database Helpers ---
 
