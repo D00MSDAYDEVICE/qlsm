@@ -6,6 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.39.1` | 2026-09-17 | [#221](https://github.com/dngrtech/qlsm/pull/221) | Bug fixes and improvements. |
 | `v1.39.0` | 2026-09-17 | [#219](https://github.com/dngrtech/qlsm/pull/219) | New installs list the **Doomsday's Plugins Repository** plugin repository under **Settings → Plugin Repositories** out of the box. |
 | `v1.38.0` | 2026-09-17 | [#218](https://github.com/dngrtech/qlsm/pull/218) | Push a downloaded plugin to every active host of its runtime automatically, and mark shared plugins the host does not have yet with a **not on host** badge and a push button in the **Plugins** tab. |
 | `v1.37.1` | 2026-09-16 | [#217](https://github.com/dngrtech/qlsm/pull/217) | Store plugins downloaded from a plugin repository in `data/shared-plugins/<runtime>/` so they reach your hosts and survive updates. Plugins downloaded before this version must be downloaded again. |
