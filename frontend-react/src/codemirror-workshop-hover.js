@@ -60,6 +60,30 @@ export function renderWorkshopPreview(dom, id, preview) {
     dom.append(link);
 }
 
+// Thumbnails that have finished loading (or failed), so the browser can paint
+// them straight from its cache. Rendering text before the image arrives makes
+// the tooltip grow and jump once the image lands.
+const settledImages = new Set();
+export const IMAGE_WAIT_MS = 1500;
+
+const imageSettled = (preview) => !preview?.previewUrl || settledImages.has(preview.previewUrl);
+
+function preloadImage(url) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const done = () => {
+            settledImages.add(url);
+            resolve();
+        };
+        img.onload = done;
+        img.onerror = done;
+        img.src = url;
+        // A slow CDN shouldn't hold the tooltip on "Loading…"; the image box has a
+        // fixed height, so a late image fills in without moving anything.
+        setTimeout(resolve, IMAGE_WAIT_MS);
+    });
+}
+
 export function workshopHoverSource(view, pos) {
     const line = view.state.doc.lineAt(pos);
     const match = findWorkshopIdAt(line.text, pos - line.from);
@@ -75,11 +99,18 @@ export function workshopHoverSource(view, pos) {
             let active = true;
 
             const cached = getCachedWorkshopPreview(match.id);
-            renderWorkshopPreview(dom, match.id, cached);
-            if (!cached) {
-                fetchWorkshopPreview(match.id).then((preview) => {
-                    if (active) renderWorkshopPreview(dom, match.id, preview);
-                });
+            if (cached && imageSettled(cached)) {
+                renderWorkshopPreview(dom, match.id, cached);
+            } else {
+                renderWorkshopPreview(dom, match.id, null);
+                Promise.resolve(cached || fetchWorkshopPreview(match.id))
+                    .then(async (preview) => {
+                        if (active && !imageSettled(preview)) await preloadImage(preview.previewUrl);
+                        return preview;
+                    })
+                    .then((preview) => {
+                        if (active) renderWorkshopPreview(dom, match.id, preview);
+                    });
             }
 
             return {
@@ -102,7 +133,7 @@ const workshopPreviewTheme = EditorView.baseTheme({
     '.cm-workshop-preview-image': {
         display: 'block',
         width: '100%',
-        maxHeight: '158px',
+        height: '158px',
         objectFit: 'cover',
         borderRadius: '4px',
         marginBottom: '6px',

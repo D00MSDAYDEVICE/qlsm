@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 
 import * as cache from '../utils/workshopPreviewCache';
 import {
+    IMAGE_WAIT_MS,
     findWorkshopIdAt,
     renderWorkshopPreview,
     workshopHoverSource,
@@ -83,7 +84,22 @@ describe('renderWorkshopPreview', () => {
 });
 
 describe('workshopHoverSource', () => {
-    beforeEach(() => vi.clearAllMocks());
+    let images;
+    let urlCounter = 0;
+    // Each test gets its own thumbnail URL: loaded URLs are remembered module-wide.
+    const withFreshUrl = () => ({ ...found, previewUrl: `https://img.test/${urlCounter++}.jpg` });
+
+    beforeEach(() => {
+        vi.clearAllMocks();
+        images = [];
+        vi.stubGlobal('Image', class {
+            constructor() { images.push(this); }
+        });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
 
     const viewFor = (doc) => ({ state: EditorState.create({ doc }) });
 
@@ -93,7 +109,7 @@ describe('workshopHoverSource', () => {
 
     it('covers the id range on the hovered line and fills in after fetch', async () => {
         cache.getCachedWorkshopPreview.mockReturnValue(null);
-        cache.fetchWorkshopPreview.mockResolvedValue(found);
+        cache.fetchWorkshopPreview.mockResolvedValue({ ...found, previewUrl: null });
         const view = viewFor('// maps\n2358556636 // cg\n');
 
         const tooltip = workshopHoverSource(view, 12);
@@ -106,8 +122,56 @@ describe('workshopHoverSource', () => {
         await vi.waitFor(() => expect(dom.textContent).toContain('Campgrounds Redux'));
     });
 
+    it('keeps showing Loading until the thumbnail has loaded', async () => {
+        const preview = withFreshUrl();
+        cache.getCachedWorkshopPreview.mockReturnValue(null);
+        cache.fetchWorkshopPreview.mockResolvedValue(preview);
+
+        const { dom } = workshopHoverSource(viewFor('2358556636'), 2).create();
+        await vi.waitFor(() => expect(images).toHaveLength(1));
+        expect(images[0].src).toBe(preview.previewUrl);
+        expect(dom.textContent).toContain('Loading');
+
+        images[0].onload();
+        await vi.waitFor(() => expect(dom.textContent).toContain('Campgrounds Redux'));
+        expect(dom.querySelector('img').getAttribute('src')).toBe(preview.previewUrl);
+    });
+
+    it('renders anyway if the thumbnail fails or is slow', async () => {
+        cache.getCachedWorkshopPreview.mockReturnValue(null);
+        cache.fetchWorkshopPreview.mockResolvedValue(withFreshUrl());
+        const failed = workshopHoverSource(viewFor('1'), 0).create();
+        await vi.waitFor(() => expect(images).toHaveLength(1));
+        images[0].onerror();
+        await vi.waitFor(() => expect(failed.dom.textContent).toContain('Campgrounds Redux'));
+
+        vi.useFakeTimers();
+        cache.fetchWorkshopPreview.mockResolvedValue(withFreshUrl());
+        const slow = workshopHoverSource(viewFor('2'), 0).create();
+        await vi.waitFor(() => expect(images).toHaveLength(2));
+        expect(slow.dom.textContent).toContain('Loading');
+        await vi.advanceTimersByTimeAsync(IMAGE_WAIT_MS);
+        expect(slow.dom.textContent).toContain('Campgrounds Redux');
+    });
+
+    it('waits for the thumbnail of a cached preview whose image never loaded', async () => {
+        const preview = withFreshUrl();
+        cache.getCachedWorkshopPreview.mockReturnValue(preview);
+
+        const { dom } = workshopHoverSource(viewFor('2358556636'), 2).create();
+        expect(dom.textContent).toContain('Loading');
+        expect(cache.fetchWorkshopPreview).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(images).toHaveLength(1));
+        images[0].onload();
+        await vi.waitFor(() => expect(dom.textContent).toContain('Campgrounds Redux'));
+
+        // Second hover: the image is in the browser cache, so render at once.
+        const again = workshopHoverSource(viewFor('2358556636'), 2).create();
+        expect(again.dom.textContent).toContain('Campgrounds Redux');
+    });
+
     it('renders cached previews immediately without fetching', () => {
-        cache.getCachedWorkshopPreview.mockReturnValue(found);
+        cache.getCachedWorkshopPreview.mockReturnValue({ ...found, previewUrl: null });
 
         const { dom } = workshopHoverSource(viewFor('2358556636'), 2).create();
 

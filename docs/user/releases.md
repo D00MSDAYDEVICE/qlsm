@@ -6,6 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.40.1` | 2026-09-17 | [#223](https://github.com/dngrtech/qlsm/pull/223) | Bug fixes and improvements. |
 | `v1.40.0` | 2026-09-17 | [#222](https://github.com/dngrtech/qlsm/pull/222) | Hover over a Workshop item ID in `workshop.txt` to preview its thumbnail, title and description from Steam. |
 | `v1.39.2` | 2026-09-17 | [#221](https://github.com/dngrtech/qlsm/pull/221) | Bug fixes and improvements. |
 | `v1.39.1` | 2026-09-17 | [#220](https://github.com/dngrtech/qlsm/pull/220) | List every plugin by filename in the **Plugins** tab (a plugin's friendly name now shows in its info tooltip), and show the filename next to each plugin's name under **Settings → Plugin Repositories**. |
