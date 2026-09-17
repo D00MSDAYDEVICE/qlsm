@@ -1,4 +1,4 @@
-import { EditorView, hoverTooltip } from '@codemirror/view';
+import { EditorView, hoverTooltip, repositionTooltips } from '@codemirror/view';
 import { fetchWorkshopPreview, getCachedWorkshopPreview } from './utils/workshopPreviewCache';
 
 // Hover tooltip for workshop.txt: shows the Steam Workshop item's thumbnail,
@@ -109,7 +109,12 @@ export function workshopHoverSource(view, pos) {
                         return preview;
                     })
                     .then((preview) => {
-                        if (active) renderWorkshopPreview(dom, match.id, preview);
+                        if (!active) return;
+                        renderWorkshopPreview(dom, match.id, preview);
+                        // The tooltip sits above the ID, so it must move up as it grows.
+                        // CodeMirror only notices the resize ~50ms later, which paints
+                        // a frame of the taller tooltip covering the ID first.
+                        repositionTooltips(view);
                     });
             }
 

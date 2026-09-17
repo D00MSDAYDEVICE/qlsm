@@ -101,7 +101,7 @@ describe('workshopHoverSource', () => {
         vi.useRealTimers();
     });
 
-    const viewFor = (doc) => ({ state: EditorState.create({ doc }) });
+    const viewFor = (doc) => ({ state: EditorState.create({ doc }), plugin: vi.fn(() => null) });
 
     it('returns null away from ids', () => {
         expect(workshopHoverSource(viewFor('// comment\n'), 3)).toBeNull();
@@ -127,14 +127,18 @@ describe('workshopHoverSource', () => {
         cache.getCachedWorkshopPreview.mockReturnValue(null);
         cache.fetchWorkshopPreview.mockResolvedValue(preview);
 
-        const { dom } = workshopHoverSource(viewFor('2358556636'), 2).create();
+        const view = viewFor('2358556636');
+        const { dom } = workshopHoverSource(view, 2).create();
         await vi.waitFor(() => expect(images).toHaveLength(1));
         expect(images[0].src).toBe(preview.previewUrl);
         expect(dom.textContent).toContain('Loading');
+        expect(view.plugin).not.toHaveBeenCalled();
 
         images[0].onload();
         await vi.waitFor(() => expect(dom.textContent).toContain('Campgrounds Redux'));
         expect(dom.querySelector('img').getAttribute('src')).toBe(preview.previewUrl);
+        // Repositions right away instead of waiting for CodeMirror's delayed resize check
+        expect(view.plugin).toHaveBeenCalled();
     });
 
     it('renders anyway if the thumbnail fails or is slow', async () => {
