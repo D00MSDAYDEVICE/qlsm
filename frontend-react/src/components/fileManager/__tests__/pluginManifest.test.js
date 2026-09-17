@@ -6,7 +6,7 @@ import {
   getPluginCommands,
   getPluginCvars,
   getPluginDescription,
-  getPluginDisplayLabel,
+  getPluginLabel,
   getPluginManifest,
 } from '../pluginManifest';
 
@@ -30,22 +30,16 @@ describe('getPluginManifest', () => {
   });
 });
 
-describe('getPluginDisplayLabel', () => {
-  it('uses the manifest label when present', () => {
-    const item = { name: 'balance.py', plugin_manifest: { label: 'Team Balance' } };
-    expect(getPluginDisplayLabel(item)).toBe('Team Balance');
+describe('getPluginLabel', () => {
+  it('returns the manifest label when present', () => {
+    const item = { name: 'balance.py', plugin_manifest: { label: ' Team Balance ' } };
+    expect(getPluginLabel(item)).toBe('Team Balance');
   });
 
-  it('falls back to the filename with no manifest', () => {
-    expect(getPluginDisplayLabel({ name: 'balance.py' })).toBe('balance.py');
-  });
-
-  it('falls back to the filename when label is blank/whitespace', () => {
-    expect(getPluginDisplayLabel({ name: 'balance.py', plugin_manifest: { label: '   ' } })).toBe('balance.py');
-  });
-
-  it('falls back to the filename when label is not a string', () => {
-    expect(getPluginDisplayLabel({ name: 'balance.py', plugin_manifest: { label: 42 } })).toBe('balance.py');
+  it('returns null with no manifest or a blank/non-string label', () => {
+    expect(getPluginLabel({ name: 'balance.py' })).toBeNull();
+    expect(getPluginLabel({ name: 'balance.py', plugin_manifest: { label: '   ' } })).toBeNull();
+    expect(getPluginLabel({ name: 'balance.py', plugin_manifest: { label: 42 } })).toBeNull();
   });
 });
 
@@ -217,8 +211,8 @@ describe('collectPluginCvars', () => {
 
   it('marks the plugins that are actually enabled', () => {
     const cvars = collectPluginCvars(tree, ['lobby.py']);
-    expect(cvars.find(c => c.cvar === 'qlx_lobbyEnabled')).toMatchObject({ plugin: 'Lobby', enabled: true });
-    expect(cvars.find(c => c.cvar === 'qlx_serverBrandName')).toMatchObject({ plugin: 'Branding', enabled: false });
+    expect(cvars.find(c => c.cvar === 'qlx_lobbyEnabled')).toMatchObject({ plugin: 'lobby.py', enabled: true });
+    expect(cvars.find(c => c.cvar === 'qlx_serverBrandName')).toMatchObject({ plugin: 'branding.py', enabled: false });
   });
 
   it('accepts the checked paths as a Set, the way the Plugins tab holds them', () => {
@@ -233,7 +227,7 @@ describe('collectPluginCvars', () => {
     ];
     const cvars = collectPluginCvars(shared, ['b.py']);
     expect(cvars).toHaveLength(1);
-    expect(cvars[0]).toMatchObject({ plugin: 'B', enabled: true });
+    expect(cvars[0]).toMatchObject({ plugin: 'b.py', enabled: true });
   });
 
   it('returns nothing for a server with no plugin manifests', () => {

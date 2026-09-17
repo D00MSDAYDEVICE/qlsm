@@ -62,3 +62,12 @@ describe('PluginRepositoryCard download feedback', () => {
     ));
   });
 });
+
+describe('PluginRepositoryCard plugin list', () => {
+  it('shows the filename next to the friendly name', () => {
+    render(<PluginRepositoryCard repo={repo} onSync={vi.fn()} onDelete={vi.fn()} syncing={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /1 plugin/i }));
+    expect(screen.getByText('AFK Plus')).toBeInTheDocument();
+    expect(screen.getByText('afkplus.py')).toBeInTheDocument();
+  });
+});

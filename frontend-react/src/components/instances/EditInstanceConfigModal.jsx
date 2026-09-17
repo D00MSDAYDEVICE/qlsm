@@ -9,7 +9,7 @@ import ConfirmationModal from '../ConfirmationModal';
 import PresetManagerModal from '../presetManager/PresetManagerModal';
 import PresetCompatibilityDialog from '../presetManager/PresetCompatibilityDialog';
 import { combineAcceptedPaths, mergeReplacements } from '../../utils/presetCompatibility';
-import { FileManager, CONFIG_CAPS, PLUGIN_CAPS, FACTORY_CAPS, PluginCvarsModal, getPluginDisplayLabel, useStateAdapter, useDraftAdapter } from '../fileManager';
+import { FileManager, CONFIG_CAPS, PLUGIN_CAPS, FACTORY_CAPS, PluginCvarsModal, useStateAdapter, useDraftAdapter } from '../fileManager';
 import SubfolderPluginNotice from '../fileManager/SubfolderPluginNotice';
 import {
   applyPluginDependencies,
@@ -517,7 +517,7 @@ function EditInstanceConfigModal({
   };
 
   const handleEditPluginCvars = useCallback((item, cvars) => {
-    setCvarsModalTarget({ label: getPluginDisplayLabel(item), cvars });
+    setCvarsModalTarget({ label: item.name, cvars });
   }, []);
 
   const handleSavePluginCvars = useCallback((nextConfig) => {
