@@ -6,6 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.40.5` | 2026-09-18 | [#227](https://github.com/dngrtech/qlsm/pull/227) | The **Owner & Admins** tab scrollbar now matches the dark theme and lines up with the other tabs. |
 | `v1.40.4` | 2026-09-18 | [#226](https://github.com/dngrtech/qlsm/pull/226) | Server actions now wait while a backup export or restore is running, so they can't change files or data mid-restore. |
 | `v1.40.3` | 2026-09-17 | [#224](https://github.com/dngrtech/qlsm/pull/224) | Drop Source Engine query floods before they reach Quake Live servers. |
 | `v1.40.2` | 2026-09-17 | — | Bug fixes and improvements. |
