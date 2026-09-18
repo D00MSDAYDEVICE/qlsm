@@ -17,7 +17,7 @@ def app_root(tmp_path, monkeypatch):
 
 
 class TestExportBackup:
-    @patch('ui.routes.backup_routes.any_lock_held', return_value=False)
+    @patch('ui.task_lock.acquire_maintenance_lock', return_value=True)
     def test_export_returns_a_downloadable_file(self, _lock, app, client, app_root):
         make_user(app, 'admin', 'pw')
         headers = auth_headers(app, 'admin')
@@ -29,8 +29,8 @@ class TestExportBackup:
         # the EOCD record and returns True regardless of our QLBP/QLBE header.)
         assert resp.data[:4] == MAGIC_PLAIN
 
-    @patch('ui.routes.backup_routes.any_lock_held', return_value=True)
-    def test_export_blocked_while_task_lock_held(self, _lock, app, client, app_root):
+    @patch('ui.task_lock.acquire_maintenance_lock', return_value=False)
+    def test_export_blocked_while_a_task_lock_is_held(self, _lock, app, client, app_root):
         make_user(app, 'admin', 'pw')
         headers = auth_headers(app, 'admin')
         resp = client.post('/api/settings/backup/export', headers=headers, json={})
@@ -42,7 +42,7 @@ class TestExportBackup:
 
 
 class TestImportBackup:
-    @patch('ui.routes.backup_routes.any_lock_held', return_value=False)
+    @patch('ui.task_lock.acquire_maintenance_lock', return_value=True)
     def test_import_round_trip(self, _lock, app, client, app_root):
         make_user(app, 'admin', 'pw')
         headers = auth_headers(app, 'admin')
@@ -68,7 +68,7 @@ class TestImportBackup:
         with app.app_context():
             assert [h.name for h in Host.query.all()] == ['exported-host']
 
-    @patch('ui.routes.backup_routes.any_lock_held', return_value=False)
+    @patch('ui.task_lock.acquire_maintenance_lock', return_value=True)
     def test_import_wrong_password_returns_400(self, _lock, app, client, app_root):
         make_user(app, 'admin', 'pw')
         headers = auth_headers(app, 'admin')
@@ -82,8 +82,8 @@ class TestImportBackup:
         )
         assert resp.status_code == 400
 
-    @patch('ui.routes.backup_routes.any_lock_held', return_value=True)
-    def test_import_blocked_while_task_lock_held(self, _lock, app, client, app_root):
+    @patch('ui.task_lock.acquire_maintenance_lock', return_value=False)
+    def test_import_blocked_while_a_task_lock_is_held(self, _lock, app, client, app_root):
         make_user(app, 'admin', 'pw')
         headers = auth_headers(app, 'admin')
         resp = client.post(
@@ -97,6 +97,6 @@ class TestImportBackup:
     def test_import_requires_a_file(self, app, client, app_root):
         make_user(app, 'admin', 'pw')
         headers = auth_headers(app, 'admin')
-        with patch('ui.routes.backup_routes.any_lock_held', return_value=False):
+        with patch('ui.task_lock.acquire_maintenance_lock', return_value=True):
             resp = client.post('/api/settings/backup/import', headers=headers, data={}, content_type='multipart/form-data')
         assert resp.status_code == 400

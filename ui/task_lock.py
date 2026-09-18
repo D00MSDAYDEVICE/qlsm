@@ -1,20 +1,82 @@
-"""Redis-based per-entity task locking.
+"""Redis-based locking for entity tasks and backup maintenance.
 
-Prevents conflicting operations on the same host or instance.
-Uses SET NX EX for atomic lock acquisition and a Lua script
-for owner-validated release.
+Prevents conflicting operations on the same host or instance, and keeps a
+backup export or import mutually exclusive with every entity task. Each
+acquisition runs as a Lua script so it observes and mutates lock state in one
+atomic step, rather than checking and then acting.
 """
+from contextlib import contextmanager
 import logging
 
 log = logging.getLogger(__name__)
 
-# Lua script: delete key only if value matches (owner validation).
-# Prevents releasing another task's lock after TTL expiry.
-_RELEASE_SCRIPT = """
-if redis.call("GET", KEYS[1]) == ARGV[1] then
-    return redis.call("DEL", KEYS[1])
+# Held for the whole of a backup export or import. Entity tasks refuse to start
+# while it exists, and it refuses to be taken while any entity lock is live, so
+# a restore can never overlap a Terraform apply or an Ansible run.
+MAINTENANCE_LOCK_KEY = 'maintenance_lock:backup'
+
+# A crash backstop, not a deadline. Nothing refreshes this lock, so it has to
+# outlast any plausible export or import; a worker killed mid-restore leaves the
+# key behind and backups recover on their own once it expires.
+MAINTENANCE_LOCK_TTL = 1800
+
+# Index of the entity locks acquire_lock currently has outstanding. Maintenance
+# acquisition walks this set rather than scanning for 'task_lock:*': Redis is
+# shared with RQ, so a MATCH scan reads every job, result and registry key, and
+# inside a Lua script that sweep blocks the server for its whole duration. An
+# entry outlives its lock whenever a TTL expires without a release, so the
+# maintenance script drops the entries whose key is gone as it walks them.
+TASK_LOCK_INDEX_KEY = 'task_lock:index'
+
+# KEYS: entity lock, maintenance lock, index. ARGV: owner token, TTL.
+_ACQUIRE_ENTITY_SCRIPT = """
+if redis.call('EXISTS', KEYS[2]) == 1 then
+    return 0
+end
+local acquired = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2])
+if acquired then
+    redis.call('SADD', KEYS[3], KEYS[1])
+    return 1
 end
 return 0
+"""
+
+# KEYS: maintenance lock, index. ARGV: owner token, TTL.
+_ACQUIRE_MAINTENANCE_SCRIPT = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+    return 0
+end
+local tracked = redis.call('SMEMBERS', KEYS[2])
+for i = 1, #tracked do
+    if redis.call('EXISTS', tracked[i]) == 1 then
+        return 0
+    end
+    redis.call('SREM', KEYS[2], tracked[i])
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return 1
+"""
+
+# Delete the key only if the value matches, so a task cannot release a lock
+# that already expired and was re-acquired by someone else.
+_RELEASE_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_RELEASE_ENTITY_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    redis.call('SREM', KEYS[2], KEYS[1])
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
+
+_FORCE_RELEASE_ENTITY_SCRIPT = """
+redis.call('SREM', KEYS[2], KEYS[1])
+return redis.call('DEL', KEYS[1])
 """
 
 
@@ -27,6 +89,9 @@ def _get_redis():
 def acquire_lock(entity_type, entity_id, token, ttl):
     """Attempt to acquire a per-entity lock.
 
+    Refuses while a backup holds the maintenance lock, and records the lock in
+    the index so maintenance acquisition can see it.
+
     Args:
         entity_type: 'host' or 'instance'
         entity_id: numeric entity ID
@@ -34,15 +99,24 @@ def acquire_lock(entity_type, entity_id, token, ttl):
         ttl: lock TTL in seconds
 
     Returns:
-        True if lock acquired, False if already held.
+        True if lock acquired, False if already held or a backup is running.
     """
     redis_client = _get_redis()
     key = f"task_lock:{entity_type}:{entity_id}"
-    result = redis_client.set(key, token, nx=True, ex=ttl)
+    result = redis_client.execute_command(
+        'EVAL',
+        _ACQUIRE_ENTITY_SCRIPT,
+        3,
+        key,
+        MAINTENANCE_LOCK_KEY,
+        TASK_LOCK_INDEX_KEY,
+        token,
+        ttl,
+    )
     if result:
         log.info(f"Lock acquired: {key} (token={token}, ttl={ttl}s)")
     else:
-        log.warning(f"Lock denied: {key} already held")
+        log.warning(f"Lock denied: {key} is held or a backup is running")
     return bool(result)
 
 
@@ -61,11 +135,58 @@ def acquire_locks(entity_type, entity_ids, token, ttl):
     return True
 
 
+def acquire_maintenance_lock(redis_client, token):
+    """Take backup maintenance when no maintenance or entity lock is held."""
+    result = redis_client.execute_command(
+        'EVAL',
+        _ACQUIRE_MAINTENANCE_SCRIPT,
+        2,
+        MAINTENANCE_LOCK_KEY,
+        TASK_LOCK_INDEX_KEY,
+        token,
+        MAINTENANCE_LOCK_TTL,
+    )
+    if result:
+        log.info("Backup maintenance lock acquired")
+    else:
+        log.warning("Backup maintenance lock denied by an active lock")
+    return bool(result)
+
+
+def release_maintenance_lock(redis_client, token):
+    """Release backup maintenance only while ``token`` still owns it."""
+    result = redis_client.execute_command(
+        'EVAL', _RELEASE_SCRIPT, 1, MAINTENANCE_LOCK_KEY, token
+    )
+    if result:
+        log.info("Backup maintenance lock released")
+    else:
+        log.debug("Backup maintenance lock not released (not owner or expired)")
+    return bool(result)
+
+
+@contextmanager
+def backup_maintenance_lock(token):
+    """Hold backup maintenance for the body, yielding whether it was acquired.
+
+    The lock is not refreshed: MAINTENANCE_LOCK_TTL is set long enough to
+    outlast a backup, so the only job left is releasing it on the way out.
+    """
+    redis_client = _get_redis()
+    if not acquire_maintenance_lock(redis_client, token):
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            release_maintenance_lock(redis_client, token)
+        except Exception:
+            log.exception("Failed to release backup maintenance lock")
+
+
 def release_lock(entity_type, entity_id, token):
     """Release a per-entity lock, only if we own it.
-
-    Uses a Lua script for atomic GET+DEL to prevent releasing
-    another task's lock after TTL expiry.
 
     Args:
         entity_type: 'host' or 'instance'
@@ -78,7 +199,7 @@ def release_lock(entity_type, entity_id, token):
     redis_client = _get_redis()
     key = f"task_lock:{entity_type}:{entity_id}"
     result = redis_client.execute_command(
-        'EVAL', _RELEASE_SCRIPT, 1, key, token
+        'EVAL', _RELEASE_ENTITY_SCRIPT, 2, key, TASK_LOCK_INDEX_KEY, token
     )
     if result:
         log.info(f"Lock released: {key} (token={token})")
@@ -100,23 +221,6 @@ def release_locks(entity_type, entity_ids, token):
             )
 
 
-def any_lock_held():
-    """Return True if any task_lock:* key currently exists in Redis.
-
-    Used to block backup export/import while a background task might be
-    mid-flight against a host or instance (e.g. a Terraform apply), so a
-    backup can never capture a half-applied state.
-    """
-    redis_client = _get_redis()
-    cursor = 0
-    while True:
-        cursor, keys = redis_client.scan(cursor=cursor, match='task_lock:*', count=100)
-        if keys:
-            return True
-        if cursor == 0:
-            return False
-
-
 def force_release_lock(entity_type, entity_id):
     """Unconditionally delete a stale lock regardless of owner.
 
@@ -126,7 +230,9 @@ def force_release_lock(entity_type, entity_id):
     """
     redis_client = _get_redis()
     key = f"task_lock:{entity_type}:{entity_id}"
-    result = redis_client.delete(key)
+    result = redis_client.execute_command(
+        'EVAL', _FORCE_RELEASE_ENTITY_SCRIPT, 2, key, TASK_LOCK_INDEX_KEY
+    )
     if result:
         log.warning(f"Stale lock force-released: {key}")
     return bool(result)
