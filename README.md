@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/badge/version-1.40.5-blue)](VERSION)
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 
-📚 **[User Guide →](https://dngrtech.github.io/qlsm/)** · [Issues](https://github.com/dngrtech/qlsm/issues)
+📚 **[User Guide](https://dngrtech.github.io/qlsm/)**
 
 ![QLSM demo — Servers page, editing an instance's config with Workshop item previews, plugins, factories, hooks, and server owner & admins](docs/user/videos/edit-instance-config-demo.webp)
 
