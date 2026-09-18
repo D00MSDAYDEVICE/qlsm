@@ -1284,7 +1284,7 @@ function EditInstanceConfigModal({
                             </div>
                           )}
                           {/* Kept mounted: OwnerAdminEditor fills the operators cache the access.txt autocomplete reads. */}
-                          <div className={activeMainTab === 'admins' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+                          <div className={activeMainTab === 'admins' ? 'flex-1 min-h-0 overflow-y-auto scrollbar-thick pr-2 mr-0.5' : 'hidden'}>
                             <OwnerAdminEditor
                               serverCfgContent={serverCfgContent}
                               onServerCfgChange={handleServerCfgOwnerChange}
