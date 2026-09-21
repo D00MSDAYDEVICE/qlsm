@@ -195,5 +195,16 @@ redis==4.5.1
 
 **Creating the file:** Use the file manager in the instance's Config tab — click "New File", name it `requirements.txt`, and enter one package per line.
 
+## User Guide Navigation Has Two Independent Navs
+
+A page under `docs/user/` is reachable only if it is listed in **both** places, and neither falls back to the filesystem:
+
+- `mkdocs.yml`'s `nav:` — the published site at <https://dngrtech.github.io/qlsm/>
+- `docs/user/index.json` — the in-app **Documentation** sidebar (`DocsPage.jsx` fetches `/docs/index.json`; an article missing from it has no sidebar entry, and its route renders nothing)
+
+A new page added to only one of them 404s in the other, silently: `operations/plugin-repositories.md` shipped in `mkdocs.yml` but not in `index.json`, so `/docs/operations/plugin-repositories` was a dead route in the app while the public site served the page fine. Cross-page links make this worse — several pages already linked to it. Add both entries in the same PR, in the same position, and check `index.json` still parses.
+
+To list what has drifted, diff the two navs against the files on disk (`docs/user/**/*.md`, excluding `images/`). Known deliberate omissions from the in-app sidebar: `index.md` (the site's home page; the app has its own landing), `getting-started/installation.md` and `getting-started/uninstall.md` (you do not read them from inside a running install).
+
 ## File Size Guideline
 Keep source files under 300 lines of code (excluding comments/blanks). Files approaching 500 lines should be refactored into focused submodules. This guideline is aspirational — some high-complexity modules (e.g., `ansible_instance_mgmt.py`, `instance_routes.py`) currently exceed it and are candidates for future refactoring.
