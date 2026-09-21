@@ -311,10 +311,16 @@ frontend every 30 seconds, so confirmed visibility can take roughly 45 seconds.
 
 ### Global Backup & Restore
 
-Lets a user move a whole QLSM instance — database rows, credentials, and managed files — to a fresh host in one file. Implemented in `ui/backup_crypto.py`, `ui/task_lock.py` (`any_lock_held()`), `ui/task_logic/backup_db_export.py`/`backup_db_import.py`, `ui/task_logic/backup_files.py`, `ui/task_logic/backup_export.py`, `ui/task_logic/backup_import.py`, and `ui/routes/backup_routes.py`.
+Lets a user move a whole QLSM instance — database rows, credentials, and managed files — to a fresh host in one file. Implemented in `ui/backup_crypto.py`, `ui/task_lock.py` (`backup_maintenance_lock()`), `ui/task_logic/backup_db_export.py`/`backup_db_import.py`, `ui/task_logic/backup_files.py`, `ui/task_logic/backup_export.py`, `ui/task_logic/backup_import.py`, and `ui/routes/backup_routes.py`.
+
+Both endpoints run inside `backup_maintenance_lock()`, which holds `maintenance_lock:backup` in Redis for the whole operation. The exclusion runs both ways and is atomic in each direction: the maintenance lock cannot be taken while any entity lock is live, and `acquire_lock()` refuses to start a host or instance task while the maintenance lock exists. A backup therefore can neither begin mid-Terraform-apply nor have an Ansible run start underneath it while it swaps the managed trees.
+
+Entity locks register themselves in a `task_lock:index` set so maintenance acquisition can check them by walking that set. It deliberately does not scan for `task_lock:*`: Redis is shared with RQ, so a `MATCH` scan reads every job and result key, and inside the atomic Lua script that sweep would block the server for its duration. An index entry outlives its lock when a TTL expires without a release, so the maintenance script drops entries whose key is gone as it walks them.
+
+Nothing refreshes the maintenance lock. `MAINTENANCE_LOCK_TTL` (1800s) is a crash backstop set to outlast any plausible backup, so a worker killed mid-restore leaves the key behind and backups recover once it expires.
 
 **Export** (`POST /api/settings/backup/export`):
-1. Reject with `409` if `any_lock_held()` finds any `task_lock:*` key in Redis — a backup must never be taken mid-Terraform-apply or mid-Ansible-run.
+1. Validate the request, then take the maintenance lock, rejecting with `409` if an entity task or another backup holds it. The lock is held for every step below.
 2. `serialize_database()` snapshots every backed-up table (`Host`, `QLInstance`, `User`, `ConfigPreset`, `ApiKey`, `AppSetting`, `BinaryMetadata`) to a JSON-safe dict.
 3. `backup_file_trees()` enumerates the on-disk trees to capture: SSH keys (`terraform/ssh-keys/`), Terraform state (`terraform/vultr-root/terraform.tfstate.d/`), instance configs (`configs/`, excluding the nested `presets/` subfolder), non-builtin presets (`configs/presets/`, excluding the app-shipped `_builtin/` folder), operator-downloaded plugins for both runtimes (`data/shared-plugins/`), and system hooks (`ql-assets/data/system-hooks/`). The built-in plugin pools in `ql-assets/data/` ship with the image and are not captured. Symlinks are never followed or copied.
 4. `build_backup_zip_bytes()` writes a `manifest.json` (format version, QLSM version, timestamp), `db_export.json`, and every file under `files/<prefix>/...` into one in-memory ZIP.
@@ -322,7 +328,7 @@ Lets a user move a whole QLSM instance — database rows, credentials, and manag
 6. The result downloads as `qlsm-backup-<timestamp>.qlsmbak`.
 
 **Import** (`POST /api/settings/backup/import`) wipes this instance's database and every tree above and reloads them from the uploaded archive:
-1. Same `409` lock check as export. The archive is decrypted (`decrypt_archive()`, raising `BackupDecryptError` → `400` on wrong password or corrupt bytes), then validated: correct manifest `type`/`format_version`, parseable `db_export.json`.
+1. Same maintenance lock as export, taken after the upload is validated and read so a rejected request never blocks tasks. The archive is decrypted (`decrypt_archive()`, raising `BackupDecryptError` → `400` on wrong password or corrupt bytes), then validated: correct manifest `type`/`format_version`, parseable `db_export.json`.
 2. A best-effort local safety snapshot (`build_backup_zip_bytes()`, wrapped through `encrypt_archive()` with no password so it's a loadable `.qlsmbak`, written to `backup_snapshots/pre-restore-<timestamp>.qlsmbak`) is captured before anything destructive happens — recovery-of-last-resort only, never exposed in the UI. Only the 3 most recent snapshots are retained; older ones are pruned automatically.
 3. Each archived tree is first extracted into a staging directory sibling to its real target (inside the app's own working directory, so the swap stays on one filesystem). Then, per managed tree, every *direct child* of the real target directory is renamed aside to a reserved temp path and replaced by the matching staged child — never a whole-directory replace, since that would also delete sibling content a different tree entry owns (e.g. `configs/presets` is handled by its own entry, not the `configs` entry).
 4. `replace_database(db_data)` deletes and reloads every row, then the whole restore commits in one `db.session.commit()`.

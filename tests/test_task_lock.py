@@ -1,6 +1,71 @@
 import pytest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, call, patch
+
+from ui import task_lock
 from ui.task_lock import acquire_lock, acquire_locks, release_lock, release_locks
+
+
+class ScriptRedis:
+    """Small Redis double that evaluates the lock scripts' effects."""
+
+    def __init__(self):
+        self.values = {}
+        self.expiries = {}
+        self.sets = {}
+
+    def execute_command(self, command, script, key_count, *args):
+        assert command == 'EVAL'
+        keys = args[:key_count]
+        argv = args[key_count:]
+        if "'SADD'" in script:
+            return self._acquire_entity(keys, argv)
+        if "'SMEMBERS'" in script:
+            return self._acquire_maintenance(keys, argv)
+        if "'GET', KEYS[1]" in script:
+            return self._release(script, keys, argv)
+        return self._force_release(keys)
+
+    def _acquire_entity(self, keys, argv):
+        key, maintenance_key, index_key = keys
+        token, ttl = argv
+        if maintenance_key in self.values or key in self.values:
+            return 0
+        self.values[key] = token
+        self.expiries[key] = int(ttl)
+        self.sets.setdefault(index_key, set()).add(key)
+        return 1
+
+    def _acquire_maintenance(self, keys, argv):
+        key, index_key = keys
+        token, ttl = argv
+        if key in self.values:
+            return 0
+        # Walk the index the way the script does, dropping entries whose lock
+        # has expired rather than treating them as live.
+        for tracked in sorted(self.sets.get(index_key, set())):
+            if tracked in self.values:
+                return 0
+            self.sets[index_key].discard(tracked)
+        self.values[key] = token
+        self.expiries[key] = int(ttl)
+        return 1
+
+    def _release(self, script, keys, argv):
+        key = keys[0]
+        if self.values.get(key) != argv[0]:
+            return 0
+        if "'SREM', KEYS[2], KEYS[1]" in script:
+            self.sets.get(keys[1], set()).discard(key)
+        del self.values[key]
+        self.expiries.pop(key, None)
+        return 1
+
+    def _force_release(self, keys):
+        key, index_key = keys
+        self.sets.get(index_key, set()).discard(key)
+        self.expiries.pop(key, None)
+        return 1 if self.values.pop(key, None) is not None else 0
+
 
 @pytest.fixture
 def mock_redis():
@@ -12,24 +77,33 @@ def mock_redis():
 
 class TestAcquireLock:
     def test_acquire_succeeds(self, mock_redis):
-        mock_redis.set.return_value = True
+        mock_redis.execute_command.return_value = 1
         result = acquire_lock('host', 1, 'token-abc', ttl=300)
         assert result is True
-        mock_redis.set.assert_called_once_with(
-            'task_lock:host:1', 'token-abc', nx=True, ex=300
+        mock_redis.execute_command.assert_called_once_with(
+            'EVAL', ANY, 3, 'task_lock:host:1', 'maintenance_lock:backup',
+            'task_lock:index', 'token-abc', 300,
         )
 
     def test_acquire_fails_when_locked(self, mock_redis):
-        mock_redis.set.return_value = False
+        mock_redis.execute_command.return_value = 0
         result = acquire_lock('host', 1, 'token-abc', ttl=300)
         assert result is False
 
     def test_acquire_uses_correct_key_format(self, mock_redis):
-        mock_redis.set.return_value = True
+        mock_redis.execute_command.return_value = 1
         acquire_lock('instance', 42, 'tok', ttl=120)
-        mock_redis.set.assert_called_once_with(
-            'task_lock:instance:42', 'tok', nx=True, ex=120
+        mock_redis.execute_command.assert_called_once_with(
+            'EVAL', ANY, 3, 'task_lock:instance:42', 'maintenance_lock:backup',
+            'task_lock:index', 'tok', 120,
         )
+
+    def test_acquire_refuses_while_a_backup_holds_maintenance(self):
+        redis_client = ScriptRedis()
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            assert acquire_lock('host', 1, 'task-owner', ttl=300) is False
 
 class TestReleaseLock:
     def test_release_own_lock(self, mock_redis):
@@ -108,19 +182,132 @@ class TestReleaseLocks:
         ]
 
 
-from ui.task_lock import any_lock_held
+class TestMaintenanceLock:
+    def test_acquisition_fails_while_another_backup_holds_it(self):
+        redis_client = ScriptRedis()
+        assert task_lock.acquire_maintenance_lock(redis_client, 'first-owner')
+
+        assert task_lock.acquire_maintenance_lock(redis_client, 'second-owner') is False
+        assert redis_client.values['maintenance_lock:backup'] == 'first-owner'
+
+    def test_acquisition_fails_while_an_entity_lock_is_held(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            assert acquire_lock('instance', 9, 'task-owner', ttl=300)
+
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner') is False
+
+    @pytest.mark.parametrize('first', ['maintenance', 'entity'])
+    def test_atomic_acquisitions_cannot_both_win(self, first):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            operations = {
+                'maintenance': lambda: task_lock.acquire_maintenance_lock(
+                    redis_client, 'backup-owner'
+                ),
+                'entity': lambda: acquire_lock('host', 1, 'task-owner', ttl=300),
+            }
+            second = 'entity' if first == 'maintenance' else 'maintenance'
+
+            assert operations[first]() is True
+            assert operations[second]() is False
+
+    def test_acquisition_ignores_unrelated_keys_instead_of_scanning(self):
+        """RQ shares this Redis, so its keys must not read as held locks."""
+        redis_client = ScriptRedis()
+        redis_client.values.update({
+            'rq:job:abc123': 'queued',
+            'rq:results:abc123': 'done',
+            'task_lock_lookalike': 'not-a-lock',
+        })
+
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+        assert 'SCAN' not in task_lock._ACQUIRE_MAINTENANCE_SCRIPT
+
+    def test_acquisition_prunes_index_entries_whose_lock_expired(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            assert acquire_lock('host', 4, 'task-owner', ttl=300)
+
+        # The TTL lapses without a release, leaving only the index entry.
+        del redis_client.values['task_lock:host:4']
+
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+        assert redis_client.sets['task_lock:index'] == set()
+
+    def test_released_entity_lock_stops_blocking_acquisition(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            assert acquire_lock('host', 4, 'task-owner', ttl=300)
+            assert task_lock.acquire_maintenance_lock(redis_client, 'owner') is False
+            assert release_lock('host', 4, 'task-owner')
+
+        assert redis_client.sets['task_lock:index'] == set()
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+
+    def test_force_released_lock_stops_blocking_acquisition(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            assert acquire_lock('host', 4, 'task-owner', ttl=300)
+            assert task_lock.force_release_lock('host', 4)
+
+        assert redis_client.sets['task_lock:index'] == set()
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+
+    def test_only_owner_can_release(self):
+        redis_client = ScriptRedis()
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+
+        assert task_lock.release_maintenance_lock(redis_client, 'other-owner') is False
+        assert redis_client.values['maintenance_lock:backup'] == 'backup-owner'
+        assert task_lock.release_maintenance_lock(redis_client, 'backup-owner') is True
+        assert 'maintenance_lock:backup' not in redis_client.values
+
+    def test_ttl_outlasts_a_backup_since_nothing_refreshes_it(self):
+        redis_client = ScriptRedis()
+        assert task_lock.acquire_maintenance_lock(redis_client, 'backup-owner')
+
+        assert redis_client.expiries['maintenance_lock:backup'] == 1800
+        assert task_lock.MAINTENANCE_LOCK_TTL == 1800
 
 
-class TestAnyLockHeld:
-    def test_false_when_no_keys(self, mock_redis):
-        mock_redis.scan.return_value = (0, [])
-        assert any_lock_held() is False
+class TestBackupMaintenanceLockContext:
+    def test_context_releases_the_lock_on_the_way_out(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            with task_lock.backup_maintenance_lock('backup-owner') as acquired:
+                assert acquired is True
+                assert redis_client.values['maintenance_lock:backup'] == 'backup-owner'
 
-    def test_true_when_a_key_is_found(self, mock_redis):
-        mock_redis.scan.return_value = (0, [b'task_lock:host:1'])
-        assert any_lock_held() is True
+        assert 'maintenance_lock:backup' not in redis_client.values
 
-    def test_scans_across_cursor_pages(self, mock_redis):
-        mock_redis.scan.side_effect = [(5, []), (0, [b'task_lock:instance:2'])]
-        assert any_lock_held() is True
-        assert mock_redis.scan.call_count == 2
+    def test_context_yields_false_without_taking_a_held_lock(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            assert acquire_lock('host', 1, 'task-owner', ttl=300)
+
+            with task_lock.backup_maintenance_lock('backup-owner') as acquired:
+                assert acquired is False
+
+        assert 'maintenance_lock:backup' not in redis_client.values
+        assert redis_client.values['task_lock:host:1'] == 'task-owner'
+
+    def test_exception_in_the_body_still_releases_the_lock(self):
+        redis_client = ScriptRedis()
+        with (
+            patch('ui.task_lock._get_redis', return_value=redis_client),
+            pytest.raises(RuntimeError, match='restore failed'),
+        ):
+            with task_lock.backup_maintenance_lock('backup-owner'):
+                raise RuntimeError('restore failed')
+
+        assert 'maintenance_lock:backup' not in redis_client.values
+
+    def test_release_only_removes_its_own_token(self):
+        redis_client = ScriptRedis()
+        with patch('ui.task_lock._get_redis', return_value=redis_client):
+            with task_lock.backup_maintenance_lock('backup-owner'):
+                # A TTL lapse and a fresh backup taking over mid-body.
+                redis_client.values['maintenance_lock:backup'] = 'replacement-owner'
+
+        assert redis_client.values['maintenance_lock:backup'] == 'replacement-owner'
