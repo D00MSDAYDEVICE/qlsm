@@ -130,6 +130,21 @@ Any new instance-level playbook (one that acts on an already-deployed `QLInstanc
 ### LAN Rate Policy Mirrors
 `ui/lan_rate_policy.py` and `frontend-react/src/utils/lanRateCompatibility.js` implement the same 99k LAN Rate compatibility rules — currently: fixed on for minqlxtended hosts (`lan_rate_forced_on()` / `isLanRateForcedOn()`, a QLSM product decision, not engine behaviour), unrestricted for hosts migrated to the LD_PRELOAD hook mechanism, and Debian-only for the remaining legacy iptables hosts. They are deliberate mirrors, not a shared module: the frontend needs its own copy to render the toggle's on/off/disabled state and tooltip before any API round trip, while the backend enforces the same policy authoritatively on write. A rule change in one — a new runtime, a new supported OS, a new migration state — must be made in the other in the same change, or the toggle's rendered state and the backend's actual behavior can silently diverge.
 
+### Plugin Manifest Validation Mirrors
+`frontend-react/src/utils/pluginManifestValidation.js` backs the **Edit & Export Manifest** editor on a plugin repository card. It has no backend endpoint: it re-implements, client-side, what `ui/plugin_repositories.py` does to a fetched `qlsm-plugins.json` so the operator can see — before committing the file to their repository — what QLSM would silently discard from it.
+
+Three constants in it are deliberate copies and are commented as such:
+
+| Frontend | Mirrors | Effect if they drift |
+| --- | --- | --- |
+| `FILENAME_RE` | `_FILENAME_RE` in `ui/plugin_repositories.py` | The editor flags a filename QLSM would accept, or stays silent on one QLSM drops on sync |
+| `DOTTED_VERSION_RE` | `_parse_dotted_version()` in `ui/plugin_repositories.py` | A `requires_qlsm_version` the editor accepts is ignored by the version gate |
+| `KNOWN_CVAR_TYPES` | the `bool` / `number` / else-string branches in `PluginCvarsModal.jsx` | A cvar type the editor calls fine renders as a plain text box in the settings form |
+
+Change one and change its mirror in the same PR. Severity follows the consequence, and new rules should keep to it: `error` is reserved for the two things that actually lose data on the next sync (an entry dropped for a bad filename, a `cvars`/`commands` field dropped for not being a list); everything else — a missing label, an unrecognized cvar type — is `warning`, because `ui/plugin_manifest.py` treats that metadata as optional display enrichment and nothing enforces it server-side.
+
+The editor is authoring-only by design. `PluginRepository.manifest_json` is a verbatim cache of the last fetch and every sync overwrites it, so the editor's output is a **Download**, never a write back to the row — persisting it would look reverted on the next sync.
+
 ## Instance Config Folders
 
 Instance config directories (`configs/<host_name>/<instance_id>/`) support user-managed subfolders, nested up to 3 levels deep, for `.ent` files (entity overrides). This is in addition to the always-present `scripts/` and `factories/` reserved folders.
