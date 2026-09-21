@@ -263,11 +263,10 @@
         - iptables-persistent/autosave_v6
       when: firewall_mode == 'full'
 
-      - name: Ensure gnupg is installed for keyring management
+    - name: Ensure gnupg is installed for keyring management
       apt:
         name: gnupg
         state: present
-        update_cache: yes
       environment:
         DEBIAN_FRONTEND: noninteractive
 
