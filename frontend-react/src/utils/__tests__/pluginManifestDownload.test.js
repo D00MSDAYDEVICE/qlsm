@@ -7,6 +7,21 @@ describe('cleanPluginForExport', () => {
       .toEqual({ filename: 'x.py' });
   });
 
+  it('strips the editor\'s internal _key from cvars and commands', () => {
+    const cleaned = cleanPluginForExport({
+      _key: 'plugin-0',
+      filename: 'x.py',
+      cvars: [{ _key: 'cvar-1', cvar: 'qlx_x', label: 'X' }],
+      commands: [{ _key: 'command-2', name: 'x' }],
+    });
+    expect(cleaned).toEqual({
+      filename: 'x.py',
+      cvars: [{ cvar: 'qlx_x', label: 'X' }],
+      commands: [{ name: 'x' }],
+    });
+    expect(JSON.stringify(cleaned)).not.toContain('_key');
+  });
+
   it('includes populated fields and non-empty cvars/commands', () => {
     const plugin = {
       filename: 'x.py',
@@ -33,6 +48,15 @@ describe('safeManifestFilename', () => {
 
   it('leaves an existing .json extension alone', () => {
     expect(safeManifestFilename('my-plugins.json')).toBe('my-plugins.json');
+  });
+
+  it('strips path separators and other unsafe characters', () => {
+    expect(safeManifestFilename('../../etc/passwd')).toBe('etc-passwd.json');
+    expect(safeManifestFilename('my plugins!.json')).toBe('my-plugins-.json');
+  });
+
+  it('falls back when nothing safe is left', () => {
+    expect(safeManifestFilename('///')).toBe('qlsm-plugins.json');
   });
 });
 

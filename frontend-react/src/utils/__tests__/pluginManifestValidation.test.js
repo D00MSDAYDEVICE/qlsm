@@ -32,7 +32,10 @@ describe('validateManifestPlugins', () => {
       { filename: 'afkplus.py', label: 'A' },
       { filename: 'afkplus.py', label: 'B' },
     ]);
-    expect(issues.some((i) => i.severity === 'error' && /appears 2 times/.test(i.message))).toBe(true);
+    const dupes = issues.filter((i) => i.severity === 'error' && /appears 2 times/.test(i.message));
+    // One per offending row, each carrying its index, so the editor can mark
+    // both rows instead of reporting a finding that belongs to no row.
+    expect(dupes.map((i) => i.index)).toEqual([0, 1]);
   });
 
   it('errors when cvars/commands is present but not a list', () => {

@@ -91,4 +91,84 @@ describe('PluginManifestEditorModal', () => {
     render(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={{ plugins: [{ filename: 'x.py' }] }} />);
     expect(screen.getByRole('button', { name: /sort a–z/i })).toBeDisabled();
   });
+
+  // A cvar arrives exactly as the repository wrote it, so `label` and
+  // `description` can be missing. Bound as `value={c.label}` those inputs go
+  // uncontrolled, and React -- reusing the row's DOM node across plugins --
+  // left the previous plugin's text sitting in them.
+  it('does not carry cvar text from one plugin over to the next', () => {
+    const twoCvars = {
+      id: 9,
+      plugins: [
+        { filename: 'a.py', label: 'Alpha', cvars: [{ cvar: 'qlx_a', type: 'number', default: 1 }] },
+        { filename: 'b.py', label: 'Bravo', cvars: [{ cvar: 'qlx_b', type: 'number', default: 2 }] },
+      ],
+    };
+    render(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={twoCvars} />);
+
+    fireEvent.change(screen.getByPlaceholderText('label'), { target: { value: 'TYPED-INTO-A' } });
+    expect(screen.getByPlaceholderText('label')).toHaveValue('TYPED-INTO-A');
+
+    fireEvent.click(screen.getByText('Bravo'));
+
+    expect(screen.getByDisplayValue('qlx_b')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('label')).toHaveValue('');
+  });
+
+  it('names both rows of a duplicate filename in the issue list', () => {
+    const duplicates = {
+      id: 4,
+      plugins: [
+        { filename: 'dupe.py', label: 'One', description: 'd' },
+        { filename: 'dupe.py', label: 'Two', description: 'd' },
+      ],
+    };
+    render(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={duplicates} />);
+
+    const reported = screen.getAllByText(/"dupe.py" appears 2 times/);
+    expect(reported).toHaveLength(2);
+    expect(reported.map((el) => el.textContent)).toEqual([
+      expect.stringContaining('Plugin #1'),
+      expect.stringContaining('Plugin #2'),
+    ]);
+  });
+
+  it('jumps to the offending plugin when its issue is clicked', () => {
+    const mixed = {
+      id: 5,
+      plugins: [
+        { filename: 'good.py', label: 'Good', description: 'd' },
+        { filename: 'bad name.py', label: 'Bad', description: 'd' },
+      ],
+    };
+    render(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={mixed} />);
+
+    expect(screen.getByDisplayValue('good.py')).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/filename must be a bare/));
+    expect(screen.getByDisplayValue('bad name.py')).toBeInTheDocument();
+  });
+
+  // PluginRepositoriesPage rebuilds the whole repos array on every silent
+  // poll, so `repo` arrives as a new object with the same id.
+  it('keeps in-progress edits when the repo object is replaced by a poll', () => {
+    const { rerender } = render(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={repo} />);
+
+    fireEvent.change(screen.getByPlaceholderText('myplugin.py'), { target: { value: 'renamed.py' } });
+    rerender(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={{ ...repo, plugins: [...repo.plugins] }} />);
+
+    expect(screen.getByDisplayValue('renamed.py')).toBeInTheDocument();
+  });
+
+  it('offers "not set" for a cvar type and shows an unrecognized one as-is', () => {
+    const oddType = {
+      id: 6,
+      plugins: [{ filename: 'x.py', label: 'X', description: 'd', cvars: [{ cvar: 'qlx_x', label: 'X', type: 'integer' }] }],
+    };
+    render(<PluginManifestEditorModal isOpen onClose={vi.fn()} repo={oddType} />);
+
+    const select = screen.getByLabelText('Cvar type');
+    expect(select).toHaveValue('integer');
+    expect(screen.getByRole('option', { name: 'not set' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /integer \(unrecognized\)/ })).toBeInTheDocument();
+  });
 });

@@ -15,7 +15,7 @@
 // Mirrors ui/plugin_repositories.py's `_FILENAME_RE` exactly.
 const FILENAME_RE = /^[A-Za-z0-9_-]+\.py$/;
 // Mirrors PluginCvarsModal.jsx's three branches (bool / number / else-string).
-const KNOWN_CVAR_TYPES = ['string', 'number', 'bool'];
+export const KNOWN_CVAR_TYPES = ['string', 'number', 'bool'];
 // Mirrors ui/plugin_repositories.py's _parse_dotted_version(): any number of
 // dot-separated integers, not necessarily three.
 const DOTTED_VERSION_RE = /^\d+(\.\d+)*$/;
@@ -35,7 +35,10 @@ export function validateManifestPlugins(plugins) {
   const issues = [];
   if (!Array.isArray(plugins)) return issues;
 
-  const filenameCounts = new Map();
+  // filename -> the row indexes using it, so a duplicate can be reported
+  // against each row that has it rather than as a finding belonging to no
+  // row at all (which the editor can't draw a marker for).
+  const filenameRows = new Map();
 
   plugins.forEach((p, i) => {
     const label = p?.filename ? `#${i + 1} (${p.filename})` : `#${i + 1}`;
@@ -47,7 +50,7 @@ export function validateManifestPlugins(plugins) {
         message: `Plugin ${label}: filename must be a bare "name.py" (letters, digits, "_" and "-" only) — anything else is silently dropped when qlsm fetches this file.`,
       });
     } else {
-      filenameCounts.set(p.filename, (filenameCounts.get(p.filename) || 0) + 1);
+      filenameRows.set(p.filename, [...(filenameRows.get(p.filename) || []), i]);
     }
 
     if (!p?.label) {
@@ -110,11 +113,14 @@ export function validateManifestPlugins(plugins) {
     });
   });
 
-  filenameCounts.forEach((count, filename) => {
-    if (count > 1) {
-      issues.push({
-        severity: 'error',
-        message: `"${filename}" appears ${count} times — duplicate filenames collide in qlsm's plugin list.`,
+  filenameRows.forEach((rows, filename) => {
+    if (rows.length > 1) {
+      rows.forEach((i) => {
+        issues.push({
+          severity: 'error',
+          index: i,
+          message: `Plugin #${i + 1} (${filename}): "${filename}" appears ${rows.length} times — duplicate filenames collide in qlsm's plugin list.`,
+        });
       });
     }
   });

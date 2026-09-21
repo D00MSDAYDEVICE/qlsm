@@ -1,105 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogBackdrop } from '@headlessui/react';
-import {
-  closestCenter, DndContext, DragOverlay, KeyboardSensor, PointerSensor, useSensor, useSensors,
-} from '@dnd-kit/core';
-import {
-  arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import {
-  X, FileJson, Plus, Trash2, AlertTriangle, Download, CircleAlert, GripVertical, ArrowDownAZ,
-} from 'lucide-react';
+import { X, FileJson, AlertTriangle, Download, CircleAlert } from 'lucide-react';
 import { RUNTIME_OPTIONS } from '../../constants/runtimes';
 import { validateManifestPlugins, issueCounts } from '../../utils/pluginManifestValidation';
 import { triggerManifestDownload } from '../../utils/pluginManifestDownload';
-
-// A stable id per plugin row for @dnd-kit and React keys -- plugin.filename
-// can't serve that role here the way it does for HookRow's SortableHookRow,
-// since a freshly-added plugin starts blank and two rows can briefly share
-// (or lack) a filename while the operator is mid-edit.
-let pluginKeySeed = 0;
-const makePluginKey = () => `plugin-${pluginKeySeed++}`;
-
-// Blank plugin/cvar/command shapes for "+ Add".
-const blankPlugin = () => ({
-  _key: makePluginKey(),
-  filename: '', label: '', description: '', runtime: '', requires_qlsm_version: '', cvars: [], commands: [],
-});
-const blankCvar = () => ({ cvar: '', label: '', type: 'string', default: '', description: '' });
-const blankCommand = () => ({ name: '', usage: '', description: '' });
-
-function defaultForCvarType(type) {
-  if (type === 'number') return 0;
-  if (type === 'bool') return false;
-  return '';
-}
-
-// One row in the plugin list: a drag handle (reorder), the select area, and
-// a remove button -- three separate controls rather than one nested inside
-// another, so the drag listeners never fight the click handler.
-function SortablePluginRow({ plugin, isSelected, errorBucket, onSelect, onRemove }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: plugin._key });
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-  };
-  const displayName = plugin.label || plugin.filename || 'plugin';
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-1 px-2 py-2 text-sm border-b border-[var(--surface-border)] last:border-b-0 transition-colors ${
-        isSelected ? 'bg-black/[0.05] dark:bg-white/[0.06]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.03]'
-      }`}
-    >
-      <button
-        type="button"
-        {...attributes}
-        {...listeners}
-        aria-label={`Reorder ${displayName}`}
-        className="flex-shrink-0 p-1 rounded text-slate-500 hover:text-slate-300 cursor-grab touch-none"
-      >
-        <GripVertical size={14} />
-      </button>
-      <button type="button" onClick={onSelect} className="flex items-center gap-2 min-w-0 flex-1 text-left">
-        <span
-          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-            errorBucket?.errors ? 'bg-red-500' : errorBucket?.warnings ? 'bg-amber-500' : 'bg-emerald-500'
-          }`}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[var(--text-primary)]">{plugin.label || plugin.filename || '(untitled)'}</span>
-          <span className="block truncate font-mono text-[11px] text-[var(--text-muted)]">{plugin.filename || '—'}</span>
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${displayName}`}
-        className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 flex-shrink-0"
-      >
-        <Trash2 size={13} />
-      </button>
-    </div>
-  );
-}
-
-// What follows the cursor while a row is being dragged -- a static snapshot,
-// so it doesn't need (and shouldn't have) its own drag listeners.
-function PluginRowOverlay({ plugin }) {
-  return (
-    <div className="flex items-center gap-1 px-2 py-2 text-sm bg-[var(--surface-raised)] border border-[var(--surface-border)] rounded-md shadow-lg">
-      <span className="flex-shrink-0 p-1 text-slate-400"><GripVertical size={14} /></span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[var(--text-primary)]">{plugin.label || plugin.filename || '(untitled)'}</span>
-        <span className="block truncate font-mono text-[11px] text-[var(--text-muted)]">{plugin.filename || '—'}</span>
-      </span>
-    </div>
-  );
-}
+import { blankPlugin, blankCvar, blankCommand, buildManifestDraft } from '../../utils/pluginManifestDraft';
+import PluginManifestPluginList from './PluginManifestPluginList';
+import PluginManifestCvarRows from './PluginManifestCvarRows';
+import PluginManifestCommandRows from './PluginManifestCommandRows';
+import PluginManifestIssues from './PluginManifestIssues';
 
 /**
  * Edits a local, in-memory copy of one repository's plugin list and exports
@@ -118,27 +27,20 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [filename, setFilename] = useState('qlsm-plugins.json');
 
+  // Seeded on open and on a change of *which* repository is being edited --
+  // deliberately not on `repo`'s object identity. PluginRepositoriesPage
+  // replaces the whole repos array on every silent poll (a finished plugin
+  // download triggers one), so depending on the object itself would throw the
+  // operator's in-progress edits away mid-session with no warning.
   useEffect(() => {
     if (isOpen) {
-      // Only the fields a real qlsm-plugins.json entry carries -- notably
-      // never `version_risk`, which qlsm adds itself at sync time from
-      // requires_qlsm_version + this install's own VERSION and is never
-      // something to author or ship in the file.
-      const draft = (repo?.plugins || []).map((p) => ({
-        _key: makePluginKey(),
-        filename: p.filename || '',
-        label: p.label || '',
-        description: p.description || '',
-        runtime: p.runtime || '',
-        requires_qlsm_version: p.requires_qlsm_version || '',
-        cvars: Array.isArray(p.cvars) ? p.cvars : [],
-        commands: Array.isArray(p.commands) ? p.commands : [],
-      }));
+      const draft = buildManifestDraft(repo?.plugins);
       setPlugins(draft);
       setSelectedIndex(draft.length ? 0 : -1);
       setFilename('qlsm-plugins.json');
     }
-  }, [isOpen, repo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, repo?.id]);
 
   const issues = useMemo(() => validateManifestPlugins(plugins), [plugins]);
   const { errors, warnings } = useMemo(() => issueCounts(issues), [issues]);
@@ -156,14 +58,14 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
   const updatePlugin = (index, patch) => {
     setPlugins((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
   };
-  const updateCvar = (pIndex, cIndex, patch) => {
-    setPlugins((prev) => prev.map((p, i) => (i !== pIndex ? p : {
+  const updateCvar = (cIndex, patch) => {
+    setPlugins((prev) => prev.map((p, i) => (i !== selectedIndex ? p : {
       ...p,
       cvars: p.cvars.map((c, j) => (j === cIndex ? { ...c, ...patch } : c)),
     })));
   };
-  const updateCommand = (pIndex, cIndex, patch) => {
-    setPlugins((prev) => prev.map((p, i) => (i !== pIndex ? p : {
+  const updateCommand = (cIndex, patch) => {
+    setPlugins((prev) => prev.map((p, i) => (i !== selectedIndex ? p : {
       ...p,
       commands: p.commands.map((c, j) => (j === cIndex ? { ...c, ...patch } : c)),
     })));
@@ -181,10 +83,10 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
       return prev;
     });
   };
-  const addCvar = (pIndex) => updatePlugin(pIndex, { cvars: [...(plugins[pIndex].cvars || []), blankCvar()] });
-  const removeCvar = (pIndex, cIndex) => updatePlugin(pIndex, { cvars: plugins[pIndex].cvars.filter((_, j) => j !== cIndex) });
-  const addCommand = (pIndex) => updatePlugin(pIndex, { commands: [...(plugins[pIndex].commands || []), blankCommand()] });
-  const removeCommand = (pIndex, cIndex) => updatePlugin(pIndex, { commands: plugins[pIndex].commands.filter((_, j) => j !== cIndex) });
+  const addCvar = () => updatePlugin(selectedIndex, { cvars: [...(plugins[selectedIndex].cvars || []), blankCvar()] });
+  const removeCvar = (cIndex) => updatePlugin(selectedIndex, { cvars: plugins[selectedIndex].cvars.filter((_, j) => j !== cIndex) });
+  const addCommand = () => updatePlugin(selectedIndex, { commands: [...(plugins[selectedIndex].commands || []), blankCommand()] });
+  const removeCommand = (cIndex) => updatePlugin(selectedIndex, { commands: plugins[selectedIndex].commands.filter((_, j) => j !== cIndex) });
 
   const handleDownload = () => {
     triggerManifestDownload(filename, plugins);
@@ -198,45 +100,9 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
     const selectedKey = selectedIndex >= 0 ? plugins[selectedIndex]?._key : null;
     setPlugins(nextPlugins);
     if (selectedKey) {
-      const nextIndex = nextPlugins.findIndex((p) => p._key === selectedKey);
-      setSelectedIndex(nextIndex);
+      setSelectedIndex(nextPlugins.findIndex((p) => p._key === selectedKey));
     }
   };
-
-  const handleSortAlpha = () => {
-    const sorted = [...plugins].sort((a, b) => (
-      (a.label || a.filename || '').localeCompare(b.label || b.filename || '', undefined, { sensitivity: 'base' })
-    ));
-    reorderTo(sorted);
-  };
-
-  const [activeKey, setActiveKey] = useState(null);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-  const itemKeys = useMemo(() => plugins.map((p) => p._key), [plugins]);
-  const activePlugin = useMemo(
-    () => (activeKey ? plugins.find((p) => p._key === activeKey) : null),
-    [activeKey, plugins],
-  );
-
-  const handleDragStart = useCallback((event) => {
-    setActiveKey(event.active.id);
-  }, []);
-  const handleDragEnd = useCallback((event) => {
-    setActiveKey(null);
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = plugins.findIndex((p) => p._key === active.id);
-    const newIndex = plugins.findIndex((p) => p._key === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    reorderTo(arrayMove(plugins, oldIndex, newIndex));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plugins, selectedIndex]);
-  const handleDragCancel = useCallback(() => {
-    setActiveKey(null);
-  }, []);
 
   const selected = selectedIndex >= 0 ? plugins[selectedIndex] : null;
 
@@ -266,57 +132,20 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
             <p className="text-xs text-[var(--text-muted)] mb-4 flex-shrink-0">
               Edits a local copy of this repository&apos;s plugin list. Download writes a new{' '}
               <code>qlsm-plugins.json</code> for you to commit to the repository itself — Sync always
-              re-fetches from the source URL, so nothing here is saved by qlsm.
+              re-fetches from the source URL, so nothing here is saved by qlsm. Only the entries qlsm
+              could read at the last sync are listed; anything it skipped is not in this file either.
             </p>
 
             <div className="relative z-10 flex-1 min-h-0 grid grid-cols-1 md:grid-cols-[260px_1fr] gap-4">
-              {/* Plugin list */}
-              <div className="flex flex-col min-h-0 border border-[var(--surface-border)] rounded-lg overflow-hidden">
-                <div className="flex-1 overflow-y-auto scrollbar-thin divide-y divide-[var(--surface-border)]">
-                  <DndContext
-                    sensors={sensors}
-                    collisionDetection={closestCenter}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                    onDragCancel={handleDragCancel}
-                  >
-                    <SortableContext items={itemKeys} strategy={verticalListSortingStrategy}>
-                      {plugins.map((p, i) => (
-                        <SortablePluginRow
-                          key={p._key}
-                          plugin={p}
-                          isSelected={i === selectedIndex}
-                          errorBucket={issuesByPlugin.get(i)}
-                          onSelect={() => setSelectedIndex(i)}
-                          onRemove={() => removePlugin(i)}
-                        />
-                      ))}
-                    </SortableContext>
-                    <DragOverlay dropAnimation={null}>
-                      {activePlugin ? <PluginRowOverlay plugin={activePlugin} /> : null}
-                    </DragOverlay>
-                  </DndContext>
-                  {plugins.length === 0 && (
-                    <p className="text-sm text-[var(--text-muted)] p-3">No plugins yet.</p>
-                  )}
-                </div>
-                <div className="p-2 border-t border-[var(--surface-border)] flex-shrink-0 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSortAlpha}
-                    disabled={plugins.length < 2}
-                    title="Sort plugins A to Z by label"
-                    className="btn btn-secondary flex-1 justify-center !px-2"
-                  >
-                    <ArrowDownAZ className="w-4 h-4" />
-                    Sort A–Z
-                  </button>
-                  <button type="button" onClick={addPlugin} className="btn btn-secondary flex-1 justify-center !px-2">
-                    <Plus className="w-4 h-4" />
-                    Add Plugin
-                  </button>
-                </div>
-              </div>
+              <PluginManifestPluginList
+                plugins={plugins}
+                selectedIndex={selectedIndex}
+                issuesByPlugin={issuesByPlugin}
+                onSelect={setSelectedIndex}
+                onRemove={removePlugin}
+                onAdd={addPlugin}
+                onReorder={reorderTo}
+              />
 
               {/* Selected plugin editor */}
               <div className="flex flex-col min-h-0 overflow-y-auto scrollbar-thin pr-1">
@@ -380,117 +209,24 @@ function PluginManifestEditorModal({ isOpen, onClose, repo }) {
                       </div>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="label-tech">Cvars ({(selected.cvars || []).length})</span>
-                        <button type="button" onClick={() => addCvar(selectedIndex)} className="btn btn-secondary !px-2.5 !py-1 !text-xs">
-                          <Plus className="w-3.5 h-3.5" /> Add Cvar
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {(selected.cvars || []).map((c, j) => (
-                          <div key={j} className="border border-[var(--surface-border)] rounded-lg p-3 space-y-2">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                              <input
-                                className="input-base font-mono text-xs" placeholder="cvar" value={c.cvar}
-                                onChange={(e) => updateCvar(selectedIndex, j, { cvar: e.target.value })}
-                              />
-                              <input
-                                className="input-base text-xs" placeholder="label" value={c.label}
-                                onChange={(e) => updateCvar(selectedIndex, j, { label: e.target.value })}
-                              />
-                              <select
-                                className="input-base text-xs" value={c.type}
-                                onChange={(e) => updateCvar(selectedIndex, j, { type: e.target.value, default: defaultForCvarType(e.target.value) })}
-                              >
-                                <option value="string">string</option>
-                                <option value="number">number</option>
-                                <option value="bool">bool</option>
-                              </select>
-                              {c.type === 'bool' ? (
-                                <label className="flex items-center gap-2 text-xs px-1">
-                                  <input
-                                    type="checkbox" checked={!!c.default}
-                                    onChange={(e) => updateCvar(selectedIndex, j, { default: e.target.checked })}
-                                  />
-                                  default
-                                </label>
-                              ) : (
-                                <input
-                                  className="input-base font-mono text-xs"
-                                  type={c.type === 'number' ? 'number' : 'text'}
-                                  placeholder="default"
-                                  value={c.default ?? ''}
-                                  onChange={(e) => updateCvar(selectedIndex, j, {
-                                    default: c.type === 'number' ? (e.target.value === '' ? '' : Number(e.target.value)) : e.target.value,
-                                  })}
-                                />
-                              )}
-                            </div>
-                            <div className="flex gap-2 items-start">
-                              <textarea
-                                className="input-base text-xs flex-1" rows={1} placeholder="description" value={c.description}
-                                onChange={(e) => updateCvar(selectedIndex, j, { description: e.target.value })}
-                              />
-                              <button type="button" onClick={() => removeCvar(selectedIndex, j)} className="btn btn-secondary !px-2 !py-1 flex-shrink-0">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        {(selected.cvars || []).length === 0 && (
-                          <p className="text-xs text-[var(--text-muted)]">No cvars.</p>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="label-tech">Commands ({(selected.commands || []).length})</span>
-                        <button type="button" onClick={() => addCommand(selectedIndex)} className="btn btn-secondary !px-2.5 !py-1 !text-xs">
-                          <Plus className="w-3.5 h-3.5" /> Add Command
-                        </button>
-                      </div>
-                      <div className="space-y-2">
-                        {(selected.commands || []).map((c, j) => (
-                          <div key={j} className="border border-[var(--surface-border)] rounded-lg p-3 space-y-2">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                              <input
-                                className="input-base font-mono text-xs" placeholder="name" value={c.name}
-                                onChange={(e) => updateCommand(selectedIndex, j, { name: e.target.value })}
-                              />
-                              <input
-                                className="input-base font-mono text-xs" placeholder="usage" value={c.usage || ''}
-                                onChange={(e) => updateCommand(selectedIndex, j, { usage: e.target.value })}
-                              />
-                              <input
-                                className="input-base font-mono text-xs" type="number" min={0} max={5} placeholder="permission"
-                                value={c.permission ?? ''}
-                                onChange={(e) => updateCommand(selectedIndex, j, {
-                                  permission: e.target.value === '' ? undefined : Number(e.target.value),
-                                })}
-                              />
-                            </div>
-                            <div className="flex gap-2 items-start">
-                              <textarea
-                                className="input-base text-xs flex-1" rows={1} placeholder="description" value={c.description}
-                                onChange={(e) => updateCommand(selectedIndex, j, { description: e.target.value })}
-                              />
-                              <button type="button" onClick={() => removeCommand(selectedIndex, j)} className="btn btn-secondary !px-2 !py-1 flex-shrink-0">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        {(selected.commands || []).length === 0 && (
-                          <p className="text-xs text-[var(--text-muted)]">No commands.</p>
-                        )}
-                      </div>
-                    </div>
+                    <PluginManifestCvarRows
+                      cvars={selected.cvars}
+                      onAdd={addCvar}
+                      onUpdate={updateCvar}
+                      onRemove={removeCvar}
+                    />
+                    <PluginManifestCommandRows
+                      commands={selected.commands}
+                      onAdd={addCommand}
+                      onUpdate={updateCommand}
+                      onRemove={removeCommand}
+                    />
                   </div>
                 )}
               </div>
             </div>
+
+            <PluginManifestIssues issues={issues} onSelectPlugin={setSelectedIndex} />
 
             <div className="relative z-10 flex items-center justify-between gap-3 pt-4 mt-2 border-t border-slate-700/50 flex-shrink-0">
               <div className="flex items-center gap-2 text-xs">
