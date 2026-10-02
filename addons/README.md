@@ -7,7 +7,7 @@ Optional features that plug into QLSM without core knowing they exist.
 | Source | Path | Notes |
 |--------|------|-------|
 | Bundled | `addons/<id>/` | Ships inside the Docker image |
-| Installed | `$ADDON_PACKAGES_DIR/<id>/` (default `./addon-packages`) | Operator-writable volume |
+| Installed | `$ADDON_PACKAGES_DIR/<id>/` (default `./data/addon-packages`) | Operator-writable volume |
 
 A directory is an addon only if it contains `qlsm-addon.json`. An id present
 in both sources resolves to the **installed** copy, so an operator can
