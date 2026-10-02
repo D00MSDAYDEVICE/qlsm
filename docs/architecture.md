@@ -179,7 +179,7 @@ qlsm/
 │       └── ql_cvar_catalog.json # Engine cvars/commands for config-editor autocomplete
 │
 ├── addons/                      # Bundled addons shipped in the image (one subfolder per addon id)
-├── addon-packages/              # Operator-installed addons (ADDON_PACKAGES_DIR, bind-mounted, writable)
+├── data/addon-packages/         # Operator-installed addons (ADDON_PACKAGES_DIR, inside the data volume, writable)
 │
 ├── scripts/cvar-catalog/        # Inputs for scripts/gen_cvar_catalog.py (listcvars dump, curated text)
 │
