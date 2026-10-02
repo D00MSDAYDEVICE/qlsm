@@ -52,26 +52,6 @@ seed_builtin_presets() {
 
 seed_builtin_presets
 
-# ── Move addons out of the legacy ./addon-packages mount ──────────────────────
-# Installed addons now live in /app/data/addon-packages, inside the data
-# volume every deployment already mounts. Older compose files bind-mounted
-# ./addon-packages instead; copy what is there across once so an update does
-# not silently drop addons installed under that layout. Web only (it is the
-# one that runs migrations), never overwrites, never deletes the old copy.
-migrate_legacy_addon_packages() {
-    OLD_ADDONS=/app/addon-packages
-    NEW_ADDONS=/app/data/addon-packages
-    [ "${RUN_MIGRATIONS}" = "true" ] || return 0
-    [ -z "$ADDON_PACKAGES_DIR" ] || return 0
-    [ -n "$(ls -A "$OLD_ADDONS" 2>/dev/null)" ] || return 0
-    [ -z "$(ls -A "$NEW_ADDONS" 2>/dev/null)" ] || return 0
-    echo "[entrypoint] Copying installed addons from $OLD_ADDONS to $NEW_ADDONS"
-    mkdir -p "$NEW_ADDONS"
-    cp -a "$OLD_ADDONS"/. "$NEW_ADDONS"/ || echo "[entrypoint] WARNING: copying legacy addon packages failed"
-}
-
-migrate_legacy_addon_packages
-
 # ── Database init + migrations ─────────────────────────────────────────────────
 # Only the web service runs migrations (RUN_MIGRATIONS=true set in compose).
 # Gating prevents concurrent flask db upgrade calls from worker/poller, which

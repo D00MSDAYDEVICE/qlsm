@@ -32,10 +32,6 @@ x-app: &app
     - ./ansible/inventory:/app/ansible/inventory
     - ./configs:/app/configs
     - ./logs:/app/logs
-    # Legacy: installed addons now live in ./data/addon-packages (ADDON_PACKAGES_DIR,
-    # ui/config.py). This mount is kept only so entrypoint.sh can copy addons
-    # installed under the old layout across on the first start after an update.
-    - ./addon-packages:/app/addon-packages
   restart: unless-stopped
   depends_on:
     redis:
@@ -97,7 +93,6 @@ services:
       - ./ansible/inventory:/app/ansible/inventory
       - ./configs:/app/configs
       - ./logs:/app/logs
-      - ./addon-packages:/app/addon-packages
       # Self-host SSH bridge. DO NOT change to ${HOME}/.ssh — the web container
       # must not have access to the operator's full SSH identity.
       # The host-init service (above) sets up the directory and sshd config.
@@ -141,7 +136,6 @@ services:
       - ./ansible/inventory:/app/ansible/inventory
       - ./configs:/app/configs
       - ./logs:/app/logs
-      - ./addon-packages:/app/addon-packages
       # Worker removes self-host keys during destroy tasks and needs the same
       # dedicated host SSH bridge as the web service.
       - ${HOME}/.qlsm-ssh:/host-ssh
