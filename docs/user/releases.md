@@ -6,6 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.46.2` | 2026-10-02 | [#239](https://github.com/dngrtech/qlsm/pull/239) | Bug fixes and improvements. |
 | `v1.46.1` | 2026-10-01 | [#238](https://github.com/dngrtech/qlsm/pull/238) | Bug fixes and improvements. |
 | `v1.46.0` | 2026-10-01 | [#237](https://github.com/dngrtech/qlsm/pull/237) | Addons can add their own columns to the **Live Status** player table, such as a player rating. |
 | `v1.45.1` | 2026-09-29 | — | Bug fixes and improvements. |
