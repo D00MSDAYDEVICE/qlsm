@@ -51,10 +51,10 @@ function AddonInstallModal({ isOpen, onClose, onInstalled }) {
 
   return (
     <Dialog open={isOpen} as="div" className="relative z-10" onClose={handleClose}>
-      <DialogBackdrop className="modal-backdrop fixed inset-0" />
+      <DialogBackdrop transition className="modal-backdrop fixed inset-0 transition data-[enter]:ease-out data-[enter]:duration-300 data-[leave]:ease-in data-[leave]:duration-200 data-[closed]:opacity-0" />
       <div className="fixed inset-0 overflow-y-auto">
         <div className="flex min-h-full items-center justify-center p-4 text-center">
-          <Dialog.Panel className="modal-panel w-full max-w-lg transform overflow-hidden p-6 text-left align-middle">
+          <Dialog.Panel transition className="modal-panel w-full max-w-lg transform overflow-hidden p-6 text-left align-middle transition-all data-[enter]:ease-out data-[enter]:duration-300 data-[leave]:ease-in data-[leave]:duration-200 data-[closed]:opacity-0 data-[closed]:translate-y-4 data-[closed]:scale-95">
             <div className="accent-line-top" />
 
             <div className="flex items-start gap-4">
