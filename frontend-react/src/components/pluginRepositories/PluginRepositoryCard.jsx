@@ -186,8 +186,8 @@ function PluginRepositoryCard({ repo, updates, onSync, onDelete, onDownloaded, o
       const result = await installPluginRepositoryAddon(repo.id, addon.id);
       showSuccess(result.message || `"${addon.id}" installed. Restart QLSM to activate it.`);
       onDownloaded?.();
-      // A toast cannot carry the restart button, so the page shows the same
-      // banner the Addons page uses once anything here needs one.
+      // A toast cannot carry the restart button, so the page raises a warning
+      // modal for the restart the new addon needs.
       onAddonInstalled?.();
     } catch (err) {
       showError(err.error?.message || err.message || `Failed to install "${addon.id}".`);
