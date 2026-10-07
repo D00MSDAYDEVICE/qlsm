@@ -1244,11 +1244,12 @@ qlsm's own process, not the servers it manages. Used to activate addons: they re
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/system/info` | GET | `{data: {restart_supported}}` — whether this deployment can be restarted from the UI |
+| `/system/info` | GET | `{data: {restart_supported, boot_id}}` — whether this deployment can be restarted from the UI, and an id unique to the answering process |
 | `/system/restart` | POST | Ask every qlsm app process to come back on freshly loaded code (`202`) |
 
 - **How it works.** The endpoint only touches a stamp file (`QLSM_RESTART_STAMP`, default `/app/data/.restart-stamp`). `restart-watcher.sh`, started in the background by `entrypoint.sh`, polls it in every app container and signals its own PID 1: `SIGHUP` for web (gunicorn replaces its worker, the container keeps running), `SIGTERM` for worker and poller (warm shutdown, then `restart: unless-stopped` brings them back). `./data` is bind-mounted into all app containers, so one stamp reaches all of them — no control channel, no subscriber code per service, and no `docker.sock` in the web container (see `addons/TRUST.md`).
 - **Not everywhere.** `restart_supported` is false unless `entrypoint.sh` set `QLSM_SUPERVISED=1`, i.e. unless something will actually restart the process. Under `run-dev.sh` the endpoint answers `409` and the UI hides the button, because a restart there would just end qlsm.
+- **Knowing it is back.** The UI reads `boot_id` before requesting a restart and polls `/system/info` until it changes, each poll with a 4 s timeout. Any answer alone proves nothing: the worker being replaced keeps answering for a moment, and a request caught between the old worker exiting and the new one starting may never be answered.
 - **No watcher for rcon**: `python -m rcon_service` never calls `create_app()`, so addons do not live there.
 - Equivalent by hand on the Docker host: `touch data/.restart-stamp`.
 

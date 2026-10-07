@@ -90,9 +90,30 @@ def test_system_info_reports_capability(ctx, monkeypatch):
     _, client, headers, _ = ctx
 
     monkeypatch.delenv('QLSM_SUPERVISED', raising=False)
-    assert client.get('/api/system/info', headers=headers).get_json()['data'] == {
-        'restart_supported': False}
+    assert client.get('/api/system/info', headers=headers).get_json()['data'][
+        'restart_supported'] is False
 
     monkeypatch.setenv('QLSM_SUPERVISED', '1')
-    assert client.get('/api/system/info', headers=headers).get_json()['data'] == {
-        'restart_supported': True}
+    assert client.get('/api/system/info', headers=headers).get_json()['data'][
+        'restart_supported'] is True
+
+
+def test_boot_id_identifies_the_process(ctx, monkeypatch):
+    """The UI waits for this to change after a restart, so it must stay put
+    while the same process answers and differ once another one does."""
+    from ui.routes import system_routes
+
+    _, client, headers, _ = ctx
+
+    def info():
+        return client.get('/api/system/info', headers=headers).get_json()['data']['boot_id']
+
+    first = info()
+    assert first
+    assert info() == first
+
+    replacement_pid = system_routes.os.getpid() + 1
+    monkeypatch.setattr(system_routes.os, 'getpid', lambda: replacement_pid)
+    replaced = info()
+    assert replaced and replaced != first
+    assert info() == replaced

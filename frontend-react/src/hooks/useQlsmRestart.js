@@ -32,7 +32,11 @@ export function useQlsmRestart() {
 
   const restart = async () => {
     setRestarting(true);
+    let previousBootId;
     try {
+      // Read now, not at mount: it is what tells the new process apart from
+      // the one we are about to replace.
+      previousBootId = (await getSystemInfo())?.boot_id;
       await requestRestart();
     } catch (err) {
       setRestarting(false);
@@ -40,7 +44,7 @@ export function useQlsmRestart() {
       return;
     }
 
-    const back = await waitForRestart();
+    const back = await waitForRestart(previousBootId);
     if (back) {
       window.location.reload();
       return;

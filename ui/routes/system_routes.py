@@ -11,6 +11,8 @@ No control channel, no subscriber code in any service, no docker.sock -- the web
 container must not have one (see addons/TRUST.md).
 """
 import os
+import threading
+import uuid
 
 from flask import Blueprint, current_app, jsonify
 from flask_jwt_extended import jwt_required
@@ -30,6 +32,10 @@ _UNSUPPORTED_MESSAGE = (
     'started it (for a dev run: stop run-dev.sh and start it again).'
 )
 
+_boot_lock = threading.Lock()
+_boot_pid = None
+_boot_id = None
+
 
 def restart_supported():
     """True when killing our own process is safe because something restarts it."""
@@ -40,11 +46,33 @@ def _stamp_path():
     return current_app.config.get('RESTART_STAMP_FILE') or '/app/data/.restart-stamp'
 
 
+def boot_id():
+    """An id unique to this process, so a client can tell it was replaced.
+
+    Anything that merely answers proves nothing after a restart request: the
+    worker being replaced keeps serving for a moment, and gunicorn can also
+    take it down before the new one is up. Only a different id proves the new
+    process (and its freshly built app) is the one answering.
+
+    Keyed by pid, so a worker forked from a parent that already holds an id
+    still gets its own.
+    """
+    global _boot_id, _boot_pid
+    pid = os.getpid()
+    with _boot_lock:
+        if _boot_pid != pid:
+            _boot_pid, _boot_id = pid, uuid.uuid4().hex
+        return _boot_id
+
+
 @system_api_bp.route('/info', methods=['GET'])
 @jwt_required()
 def system_info_api():
-    """What the UI needs to decide whether to offer a restart at all."""
-    return jsonify({"data": {"restart_supported": restart_supported()}}), 200
+    """What the UI needs to offer a restart and to see it complete."""
+    return jsonify({"data": {
+        "restart_supported": restart_supported(),
+        "boot_id": boot_id(),
+    }}), 200
 
 
 @system_api_bp.route('/restart', methods=['POST'])
