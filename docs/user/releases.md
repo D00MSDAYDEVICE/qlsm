@@ -6,7 +6,7 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
-| `v1.47.2` | 2026-10-07 | [#242](https://github.com/dngrtech/qlsm/pull/242) | Added info tooltips for CPU Affinity, 99k LAN Rate and LD_PRELOAD Hooks, a CPU Affinity docs page, and a restart-required prompt after installing an addon from a repository. Addon dropdowns now use the standard QLSM menu, and addon dialogs animate open and closed. |
+| `v1.47.2` | 2026-10-07 | [#242](https://github.com/dngrtech/qlsm/pull/242) | Bug fixes and improvements. |
 | `v1.47.1` | 2026-10-03 | [#241](https://github.com/dngrtech/qlsm/pull/241) | Bug fixes and improvements. |
 | `v1.47.0` | 2026-10-03 | [#240](https://github.com/dngrtech/qlsm/pull/240) | Addon setup hooks now apply to standalone and self hosts. |
 | `v1.46.2` | 2026-10-02 | [#239](https://github.com/dngrtech/qlsm/pull/239) | Bug fixes and improvements. |
