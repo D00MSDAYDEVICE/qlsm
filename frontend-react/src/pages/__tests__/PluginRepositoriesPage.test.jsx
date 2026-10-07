@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getPluginRepositoryUpdates: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
+  getSystemInfo: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -30,6 +31,12 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../../components/NotificationProvider', () => ({
   useNotification: () => ({ showSuccess: mocks.showSuccess, showError: mocks.showError }),
+}));
+
+vi.mock('../../services/system', () => ({
+  getSystemInfo: mocks.getSystemInfo,
+  requestRestart: vi.fn(),
+  waitForRestart: vi.fn(),
 }));
 
 const REPO = {
@@ -58,6 +65,7 @@ describe('PluginRepositoriesPage downloads', () => {
     vi.clearAllMocks();
     mocks.getPluginRepositories.mockResolvedValue([REPO]);
     mocks.getPluginRepositoryUpdates.mockResolvedValue([]);
+    mocks.getSystemInfo.mockResolvedValue({ restart_supported: false });
     // Default resolution so a future Diff-click test fails on its own
     // assertion rather than on an unhandled rejection from the modal's fetch.
     mocks.getPluginRepositoryDiff.mockResolvedValue({ local: '', remote: '' });
@@ -248,6 +256,54 @@ describe('PluginRepositoriesPage downloads', () => {
       expect(mocks.downloadPluginRepositoryPlugins).toHaveBeenCalledWith(
         1, ['balance2.py', 'no_runtime.py'], { 'no_runtime.py': 'minqlxtended' }, false,
       );
+    });
+  });
+
+  describe('addon install', () => {
+    const ADDON_REPO = {
+      ...REPO,
+      addons: [{ id: 'cool-addon', label: 'Cool Addon', version: '1.0.0' }],
+    };
+
+    const clickInstall = async () => {
+      render(<PluginRepositoriesPage />);
+      fireEvent.click(await screen.findByText('Repo A'));
+      fireEvent.click(await screen.findByRole('button', { name: /install/i }));
+    };
+
+    beforeEach(() => {
+      mocks.getPluginRepositories.mockResolvedValue([ADDON_REPO]);
+      mocks.getSystemInfo.mockResolvedValue({ restart_supported: true });
+    });
+
+    it('raises a restart warning modal with a restart action once an addon is installed', async () => {
+      mocks.installPluginRepositoryAddon.mockResolvedValueOnce({ message: 'installed' });
+
+      await clickInstall();
+
+      expect(await screen.findByRole('heading', { name: 'Restart required' })).toBeInTheDocument();
+      expect(screen.getByText(/needs a restart before it takes effect/i)).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /restart qlsm/i })).toBeInTheDocument();
+    });
+
+    it('is an acknowledgement only where a restart is not survivable', async () => {
+      mocks.getSystemInfo.mockResolvedValue({ restart_supported: false });
+      mocks.installPluginRepositoryAddon.mockResolvedValueOnce({ message: 'installed' });
+
+      await clickInstall();
+
+      expect(await screen.findByRole('heading', { name: 'Restart required' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'OK' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /restart qlsm/i })).not.toBeInTheDocument();
+    });
+
+    it('does not warn about a restart when the install fails', async () => {
+      mocks.installPluginRepositoryAddon.mockRejectedValueOnce({ error: { message: 'nope' } });
+
+      await clickInstall();
+
+      await waitFor(() => expect(mocks.showError).toHaveBeenCalledWith('nope'));
+      expect(screen.queryByRole('heading', { name: 'Restart required' })).not.toBeInTheDocument();
     });
   });
 });

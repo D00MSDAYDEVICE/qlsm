@@ -11,7 +11,8 @@ function ConfirmationModal({
   confirmButtonText = 'Confirm',
   cancelButtonText = 'Cancel',
   confirmButtonVariant = 'danger',
-  zIndexClass = 'z-10'
+  zIndexClass = 'z-10',
+  showCancel = true
 }) {
   const getConfirmButtonClasses = () => {
     const base = 'btn';
@@ -46,13 +47,15 @@ function ConfirmationModal({
       ) : null}
       footer={(
         <>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={onClose}
-          >
-            {cancelButtonText}
-          </button>
+          {showCancel && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onClose}
+            >
+              {cancelButtonText}
+            </button>
+          )}
           <button
             type="button"
             className={getConfirmButtonClasses()}

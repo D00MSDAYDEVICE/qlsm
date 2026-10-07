@@ -79,6 +79,7 @@ nav:
   - Features:
     - QLFilter: features/qlfilter.md
     - 99k LAN Rate: features/99k-lan-rate.md
+    - CPU Affinity: features/cpu-affinity.md
     - LD_PRELOAD Hooks: features/hooks.md
   - Administration:
     - User Management & API Keys: administration/user-management.md

@@ -13,7 +13,7 @@ import { useNotification } from '../components/NotificationProvider';
 import ConfirmationModal from '../components/ConfirmationModal';
 import AddPluginRepositoryModal from '../components/pluginRepositories/AddPluginRepositoryModal';
 import PluginRepositoryCard from '../components/pluginRepositories/PluginRepositoryCard';
-import RestartQlsmBanner from '../components/system/RestartQlsmBanner';
+import AddonRestartModal from '../components/system/AddonRestartModal';
 import { useAddons } from '../contexts/AddonsContext';
 
 function PluginRepositoriesPage() {
@@ -26,11 +26,10 @@ function PluginRepositoriesPage() {
   const [selectedForDelete, setSelectedForDelete] = useState(null);
   const [syncingId, setSyncingId] = useState(null);
   // An addon installed from here is inert until qlsm restarts, same as one
-  // uploaded on the Addons page. Read from the shared catalog (same source
-  // as the Addons page) rather than local state, so the banner survives a
-  // page reload instead of resetting the moment the install toast fades.
-  const { addons, reload: reloadAddons } = useAddons();
-  const addonNeedsRestart = addons.some(a => a.pending_restart);
+  // uploaded on the Addons page. The install raises a warning modal; the
+  // catalog is reloaded so the Addons page still flags it as pending.
+  const { reload: reloadAddons } = useAddons();
+  const [isRestartModalOpen, setIsRestartModalOpen] = useState(false);
 
   const { showSuccess, showError } = useNotification();
 
@@ -153,9 +152,10 @@ function PluginRepositoriesPage() {
         </p>
       </div>
 
-      {addonNeedsRestart && (
-        <RestartQlsmBanner message="An addon was installed. QLSM needs a restart before it takes effect." />
-      )}
+      <AddonRestartModal
+        isOpen={isRestartModalOpen}
+        onClose={() => setIsRestartModalOpen(false)}
+      />
 
       {loading ? (
         <div className="users-loading-state">
@@ -178,7 +178,7 @@ function PluginRepositoriesPage() {
               onSync={handleSync}
               onDelete={openDeleteModal}
               onDownloaded={() => fetchRepos({ silent: true })}
-              onAddonInstalled={reloadAddons}
+              onAddonInstalled={() => { reloadAddons(); setIsRestartModalOpen(true); }}
             />
           ))}
         </div>

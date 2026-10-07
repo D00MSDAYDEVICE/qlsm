@@ -1,5 +1,6 @@
 import React from 'react';
 import { Eye, EyeOff } from 'lucide-react';
+import FloatingListbox from '../common/FloatingListbox';
 
 /**
  * One manifest-declared field.
@@ -44,28 +45,25 @@ function AddonField({ field, value, error, disabled, onChange }) {
   }
 
   if (field.type === 'select') {
-    const options = Array.isArray(field.options) ? field.options : [];
+    const options = (Array.isArray(field.options) ? field.options : []).map((option) => {
+      const optionValue = option && typeof option === 'object' ? option.value : option;
+      const optionLabel = option && typeof option === 'object' ? (option.label ?? option.value) : option;
+      return { value: optionValue, label: String(optionLabel) };
+    });
+    const placeholder = field.placeholder || `Select ${String(field.label ?? '').toLowerCase()}`;
     return (
       <div className="py-2">
-        <label htmlFor={inputId} className="mb-1 block text-sm text-theme-primary">
-          {field.label}
-        </label>
-        <select
-          id={inputId}
+        <FloatingListbox
+          label={field.label}
           value={value ?? ''}
+          onChange={(next) => onChange(field.key, next)}
+          options={options}
           disabled={disabled}
-          onChange={(e) => onChange(field.key, e.target.value)}
-          className="select-base"
-        >
-          {field.placeholder && <option value="" disabled>{field.placeholder}</option>}
-          {options.map((option) => {
-            const optionValue = option && typeof option === 'object' ? option.value : option;
-            const optionLabel = option && typeof option === 'object' ? (option.label ?? option.value) : option;
-            return (
-              <option key={optionValue} value={optionValue}>{optionLabel}</option>
-            );
-          })}
-        </select>
+          getOptionKey={(option) => option.value}
+          getOptionDisplay={(option) => option.label}
+          getSelectedDisplay={(selected, opts) => opts.find((o) => o.value === selected)?.label ?? placeholder}
+          placeholder={placeholder}
+        />
         {field.description && !error && (
           <p className="mt-1 text-xs text-theme-muted">{field.description}</p>
         )}

@@ -118,6 +118,11 @@
         "path": "/docs/features/99k-lan-rate.md"
       },
       {
+        "id": "cpu-affinity",
+        "title": "CPU Affinity",
+        "path": "/docs/features/cpu-affinity.md"
+      },
+      {
         "id": "hooks",
         "title": "LD_PRELOAD Hooks",
         "path": "/docs/features/hooks.md"

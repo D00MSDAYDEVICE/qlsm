@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import InstanceDetailsModal from '../InstanceDetailsModal';
@@ -55,7 +55,7 @@ vi.mock('../../common/QlColorString', () => ({
 }));
 
 vi.mock('../../common/InfoTooltip', () => ({
-  default: ({ text }) => <span data-testid="info-tooltip">{text}</span>,
+  default: ({ text, testId }) => <span data-testid={testId || 'info-tooltip'}>{text}</span>,
 }));
 
 describe('InstanceDetailsModal lan rate guard', () => {
@@ -202,6 +202,12 @@ describe('InstanceDetailsModal lan rate guard', () => {
 
     expect(await screen.findByText('CPU Affinity')).toBeInTheDocument();
     expect(screen.getByText('CPU 1')).toBeInTheDocument();
+    expect(within(screen.getByTestId('cpu-affinity-tooltip')).getByRole('link', { name: 'Learn more' }))
+      .toHaveAttribute('href', '/docs/features/cpu-affinity');
+    expect(within(screen.getByTestId('hooks-tooltip')).getByRole('link', { name: 'Learn more' }))
+      .toHaveAttribute('href', '/docs/features/hooks');
+    expect(within(screen.getByTestId('lan-rate-info-tooltip')).getByRole('link', { name: 'Learn more' }))
+      .toHaveAttribute('href', '/docs/features/99k-lan-rate');
   });
 
   it('shows automatic CPU affinity when unset', async () => {
