@@ -4,6 +4,8 @@ import { useFloating, shift, offset, autoUpdate, flip } from '@floating-ui/react
 import { Trash2, RefreshCw, ShieldCheck, ShieldOff, Loader2, Eye, PowerIcon, ArrowUpCircle, RotateCcw, FileText, ActivitySquare, PackageCheck } from 'lucide-react';
 import { HostStatus, QLFILTER_STATUS } from '../utils/statusEnums';
 import ConfirmationModal from './ConfirmationModal';
+import { useAddonMenu } from './addons/AddonMenuSection';
+import InfoTooltip from './common/InfoTooltip';
 
 function HostActionsMenu({
   host,
@@ -18,8 +20,10 @@ function HostActionsMenu({
   onOpenWatchdog,
   onOpenResize,
   onRerunSetup,
-  onOpenViewLogs
+  onOpenViewLogs,
+  onOpenRuntimeUpgrade
 }) {
+  const addonMenu = useAddonMenu('host_menu', host, host.name);
   const [isInstallQlFilterModalOpen, setIsInstallQlFilterModalOpen] = useState(false);
   const [isUninstallQlFilterModalOpen, setIsUninstallQlFilterModalOpen] = useState(false);
   const [isRerunSetupModalOpen, setIsRerunSetupModalOpen] = useState(false);
@@ -43,6 +47,9 @@ function HostActionsMenu({
 
   return (
     <>
+    {/* Outside <Menu> on purpose: Menu.Items unmounts on close, which would
+        tear down a dialog opened from one of its own entries. */}
+    {addonMenu.modal}
     <ConfirmationModal
       isOpen={isInstallQlFilterModalOpen}
       onClose={() => setIsInstallQlFilterModalOpen(false)}
@@ -268,6 +275,41 @@ function HostActionsMenu({
                     </Menu.Item>
                   )}
 
+                  {/* Runtime upgrade: hidden for hosts that cannot ever use it,
+                      disabled (with the reason) when it is just not possible now. */}
+                  {host.runtime_upgrade?.visible && (
+                    <Menu.Item>
+                      {({ active }) => {
+                        const upgradeDisabled = !host.runtime_upgrade.enabled;
+                        return (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              // aria-disabled, not disabled: a disabled button swallows
+                              // the hover the reason tooltip needs.
+                              if (upgradeDisabled) {
+                                event.preventDefault();
+                                return;
+                              }
+                              if (typeof onOpenRuntimeUpgrade === 'function') onOpenRuntimeUpgrade(host.id);
+                              closeMenu();
+                            }}
+                            aria-disabled={upgradeDisabled}
+                            className={`group flex rounded-md items-center w-full px-3 py-2 text-sm transition-colors ${upgradeDisabled ? 'opacity-40 cursor-not-allowed' : ''} ${active ? 'bg-black/[0.04] dark:bg-white/[0.06] text-theme-primary' : 'text-theme-secondary'}`}
+                          >
+                            <ArrowUpCircle size={15} className="mr-3 flex-shrink-0 text-theme-muted" />
+                            <span className="flex flex-1 items-center gap-1.5 text-left">
+                              <span>Upgrade to minqlxtended</span>
+                              {upgradeDisabled && host.runtime_upgrade.reason && (
+                                <InfoTooltip text={host.runtime_upgrade.reason} size={13} />
+                              )}
+                            </span>
+                          </button>
+                        );
+                      }}
+                    </Menu.Item>
+                  )}
+
                   {/* QLFilter Install/Uninstall */}
                   <Menu.Item>
                     {({ active }) => {
@@ -315,6 +357,9 @@ function HostActionsMenu({
                     }}
                   </Menu.Item>
                 </div>
+
+                {/* Addon-contributed actions */}
+                {addonMenu.items(closeMenu)}
 
                 {/* Destructive action */}
                 <div className="px-1 py-1" style={{ borderTop: '1px solid var(--surface-border)' }}>

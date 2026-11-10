@@ -14,7 +14,7 @@
     },
     "branding.py": {
       "origin": "upstream",
-      "sha256": "380a5ce6dd5d08ac519b0eb8d789a348f9cfcc16d3a89b8c89e3bce9dff999fb"
+      "sha256": "5bf9f22ba29535569d31209fdc5050381998e6ec38da52ed7b5daf9d1731cb5a"
     },
     "clan.py": {
       "origin": "upstream",
@@ -60,6 +60,10 @@
       "origin": "upstream",
       "sha256": "b3f7ef4f4316a8e3c0dfd80b3966a8a7a543ef7f704c4b2ca4a585d345530b87"
     },
+    "lgacc.py": {
+      "origin": "qlsm",
+      "sha256": "01f66664db157ef714e87000936c22484d0fcbadef43b1cfc75fbdaf26360790"
+    },
     "log.py": {
       "origin": "upstream",
       "sha256": "49dfc7e4498c46d5dce9e12af6fce4de76911836ac7b870e429111a4cfb0700a"
@@ -78,7 +82,7 @@
     },
     "names.py": {
       "origin": "upstream",
-      "sha256": "ed7713340354e6886872baa27419c7ae333d1e0749f8ad4904db90d6520a10ad"
+      "sha256": "010aaa32b4162d58953d76697f584689b6262e6bb9e3c90ddcc039144c378ba7"
     },
     "permission.py": {
       "origin": "upstream",
@@ -106,7 +110,7 @@
     },
     "reset_acc.py": {
       "origin": "qlsm",
-      "sha256": "1af867d66956c41b905d1c25a10599e6290345bd8284639ee4583f0c2634e6b2"
+      "sha256": "24b7ebcbc7cd01f238a1c5949b5748edb3c10de273ef6ff3e9ec8e587614f2c5"
     },
     "scores.py": {
       "origin": "upstream",

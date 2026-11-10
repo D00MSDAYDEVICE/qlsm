@@ -27,7 +27,24 @@ class Config:
     
     # Ansible Runner
     ANSIBLE_RUNNER_PRIVATE_DATA_DIR = os.environ.get('ANSIBLE_RUNNER_PRIVATE_DATA_DIR', './ansible_runner_data')
-    
+
+    # Addons: operator-installed packages live on a writable volume, separate
+    # from the `addons/` directory baked into the image, so installing one
+    # does not mean rebuilding. An id present in both resolves here.
+    # Under data/ on purpose: that is the one directory every compose file,
+    # old or new, already mounts, so an installed addon survives a container
+    # recreate even when the operator's compose predates a dedicated mount.
+    ADDON_PACKAGES_DIR = os.environ.get('ADDON_PACKAGES_DIR', './data/addon-packages')
+
+    # Host runtime upgrade snapshots (data/runtime-upgrades/<host_id>/<operation_id>/).
+    # A relative path resolves against the app root.
+    RUNTIME_UPGRADES_DIR = os.environ.get('RUNTIME_UPGRADES_DIR', 'data/runtime-upgrades')
+
+    # Restart stamp: POST /api/system/restart touches this file, restart-watcher.sh
+    # (started by entrypoint.sh) polls it in every app container. Both sides read
+    # the same env var so the two halves cannot drift apart.
+    RESTART_STAMP_FILE = os.environ.get('QLSM_RESTART_STAMP', '/app/data/.restart-stamp')
+
     # Logging
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
     LOG_FILE = os.environ.get('LOG_FILE', None)

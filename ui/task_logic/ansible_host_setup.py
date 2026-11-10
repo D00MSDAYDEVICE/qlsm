@@ -9,7 +9,7 @@ from ui import db
 from ui.constants import GAME_UDP_PORTS, RCON_TCP_PORTS
 from ui.models import Host, HostStatus, QLFilterStatus
 from ui.runtime import host_runtime
-from .common import append_log # Import from the common module
+from .common import append_log, record_host_error # Import from the common module
 # Note: No need to import _run_ansible_playbook as this task uses direct subprocess calls
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,76 @@ def _mark_host_firewall_pool_current(host):
     reachable. Only call this after a successful setup run -- a host that has
     never completed one keeps the flag False and the UI advises a re-run."""
     host.firewall_pool_v2 = True
+
+
+# Extra-vars core owns. An addon contributing one of these is ignored rather
+# than allowed to change the runtime or the firewall pool a host is built with.
+_RESERVED_SETUP_VARS = frozenset({
+    'host_timezone', 'game_udp_ports', 'rcon_tcp_ports', 'runtime',
+})
+
+
+def _addon_host_setup_extravars(host):
+    """Extra-vars dicts contributed by addons enabled on this host.
+
+    Returns [] when nothing is installed or enabled, so host setup runs the
+    exact command it ran before the addon system existed.
+    """
+    host_id = getattr(host, 'id', None)
+    try:
+        from ui.addons import dispatch
+
+        results = dispatch('host.setup', host_id, host_id) or []
+    except Exception as e:
+        log.warning('Addon host.setup hook skipped for host %s: %s', host_id, e)
+        return []
+    return [r for r in results if isinstance(r, dict) and r]
+
+
+def addon_setup_extravar_args(host, core_keys=()):
+    """The `-e` arguments addons contribute to a setup_host.yml run.
+
+    Each handler returns a dict and each dict becomes its own JSON `-e`
+    argument, appended after core's. A key core owns -- one in
+    _RESERVED_SETUP_VARS, or one of `core_keys`, the extra-vars this
+    particular run already passes -- is dropped, so an addon can never change
+    the runtime or the port pool the host is built with.
+    """
+    owned = _RESERVED_SETUP_VARS | frozenset(core_keys)
+    args = []
+    for contribution in _addon_host_setup_extravars(host):
+        safe = {k: v for k, v in contribution.items() if k not in owned}
+        if safe:
+            args += ['-e', json.dumps(safe)]
+    return args
+
+
+def _dispatch_addon_payload_sync(host):
+    """Let addons rsync their own host-side payload now that setup succeeded.
+
+    Fire-and-forget: dispatch() already isolates a handler that raises, this
+    extra try/except only guards against the dispatch call itself (e.g. no
+    addons loaded) so a payload sync can never fail the host setup task it
+    merely tags along with.
+    """
+    try:
+        # Setup has just appended its ansible output to host.logs without a
+        # commit. Handlers share this session, so their first query would
+        # autoflush that UPDATE and open a SQLite write transaction that stays
+        # open while the handler runs its own ansible; every other worker's
+        # write then times out with "database is locked". Commit first.
+        db.session.commit()
+
+        from ui.addons import dispatch
+
+        dispatch('host.payload_sync', host.id, host.id)
+    except Exception as e:
+        log.warning('Addon host.payload_sync hook skipped for host %s: %s', host.id, e)
+    finally:
+        # A handler whose flush failed leaves the shared session waiting for a
+        # rollback, which would fail the setup task's final status write.
+        if not db.session.is_active:
+            db.session.rollback()
 
 
 def setup_host_ansible_logic(host_id, rerun=False):
@@ -156,13 +226,22 @@ def setup_host_ansible_logic(host_id, rerun=False):
         # allow-list in step with the number of instances the backend accepts.
         # Must be one JSON object: the bare `-e key=[...]` form is parsed by
         # Ansible as a whitespace-split string, not a list.
-        ansible_command_args += ['-e', json.dumps({
+        setup_vars = {
             'game_udp_ports': GAME_UDP_PORTS,
             'rcon_tcp_ports': RCON_TCP_PORTS,
             # Read from the DB on every run, so re-running setup always
             # rebuilds the runtime the host was created with.
             'runtime': host_runtime(host),
-        })]
+        }
+        if getattr(host, 'runtime_deps_isolated', False):
+            # Upgraded host: instances use their own venvs, so the common
+            # pool sync must not pip-install into the system Python.
+            setup_vars['skip_pip_install'] = True
+        ansible_command_args += ['-e', json.dumps(setup_vars)]
+        # Addons may contribute extra-vars (a payload to deploy, a flag their
+        # own playbook tasks read, the repository a runtime is built from).
+        ansible_command_args += addon_setup_extravar_args(host)
+
         ansible_command_args.append(ansible_playbook_path)
 
         log.info(f"Executing Ansible command: {' '.join(ansible_command_args)}")
@@ -194,6 +273,11 @@ def setup_host_ansible_logic(host_id, rerun=False):
 
             # Log combined output to DB on success
             append_log(host, f"Ansible setup playbook successful.\nStdout:\n{stdout_content}\nStderr:\n{stderr_content}")
+
+            # Addons may need to rsync their own host-side payload now that
+            # the host is reachable and set up (a language runtime one of
+            # their plugins needs, a helper binary).
+            _dispatch_addon_payload_sync(host)
 
             # --- Final Success ---
             host.qlfilter_status = QLFilterStatus.NOT_INSTALLED
@@ -239,12 +323,5 @@ def setup_host_ansible_logic(host_id, rerun=False):
     except Exception as e:
         log.exception(f"Unhandled exception in setup_host_ansible_logic for host_id {host_id}: {e}")
         if host: # Check if host object was retrieved
-            try:
-                # Avoid overwriting specific error status if already set
-                if host.status != HostStatus.ERROR:
-                    host.status = HostStatus.ERROR
-                append_log(host, f"Task failed with unhandled exception: {e}")
-                db.session.commit()
-            except Exception as commit_err:
-                 log.error(f"Failed to update host status/log on unhandled exception: {commit_err}")
+            record_host_error(host_id, f"Task failed with unhandled exception: {e}")
         return f"Error during host {host_id} Ansible setup: {e}"

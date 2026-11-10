@@ -43,6 +43,11 @@ class reset_acc(minqlx.Plugin):
         # {steam_id: threading.Timer}
         self._pending_timers = {}
 
+        # A load or reload starts empty; pick up players already connected,
+        # otherwise their auto-reset stays off until they reconnect.
+        for p in self.players():
+            self.handle_loaded(p)
+
     # -------------------------------------------------------------------------
     # Redis persistence
     # -------------------------------------------------------------------------
@@ -250,6 +255,7 @@ class reset_acc(minqlx.Plugin):
             return
 
         minqlx.set_score(target.id, 0)
+        self._resync_lgacc(target)
 
         if not silent:
             if requester.id == target.id:
@@ -269,12 +275,21 @@ class reset_acc(minqlx.Plugin):
             requester.tell("^1Could not reset accuracy (player not fully connected?).")
             return
 
+        self._resync_lgacc(target)
+
         if not silent:
             if requester.id == target.id:
                 requester.tell("^2Accuracy reset. ^7WEAP and +acc are now 0.")
             else:
                 requester.tell(f"^2Reset accuracy for ^7{target.clean_name}^2.")
                 target.tell(f"^2Your accuracy was reset by ^7{requester.clean_name}^2.")
+
+    def _resync_lgacc(self, target):
+        # lgacc measures LG accuracy against a saved baseline; the counters we
+        # just zeroed make that baseline stale, so restart it from zero.
+        lgacc = self.plugins.get("lgacc")
+        if lgacc is not None:
+            lgacc._snapshot(target.id)
 
     def _find_player(self, name_fragment):
         for p in self.players():

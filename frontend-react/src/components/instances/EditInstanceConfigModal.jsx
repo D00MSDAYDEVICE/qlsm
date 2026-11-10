@@ -9,7 +9,7 @@ import ConfirmationModal from '../ConfirmationModal';
 import PresetManagerModal from '../presetManager/PresetManagerModal';
 import PresetCompatibilityDialog from '../presetManager/PresetCompatibilityDialog';
 import { combineAcceptedPaths, mergeReplacements } from '../../utils/presetCompatibility';
-import { FileManager, CONFIG_CAPS, PLUGIN_CAPS, FACTORY_CAPS, PluginCvarsModal, getPluginDisplayLabel, useStateAdapter, useDraftAdapter } from '../fileManager';
+import { FileManager, CONFIG_CAPS, PLUGIN_CAPS, FACTORY_CAPS, PluginCvarsModal, useStateAdapter, useDraftAdapter, useUploadBusy } from '../fileManager';
 import SubfolderPluginNotice from '../fileManager/SubfolderPluginNotice';
 import {
   applyPluginDependencies,
@@ -19,6 +19,7 @@ import {
   toQlxPluginNames,
 } from '../fileManager/pluginSelection';
 import { useNotification } from '../NotificationProvider';
+import { useHostPoolStatus } from '../../hooks/useHostPoolStatus';
 import { useCvarAutocomplete } from '../../hooks/useCvarAutocomplete';
 import InfoTooltip from '../common/InfoTooltip';
 import { qlcfgLanguage, createQlCfgLinter, stripManagedCvars } from '../../codemirror-lang-qlcfg';
@@ -29,12 +30,18 @@ import { qlworkshopLanguage } from '../../codemirror-lang-qlworkshop';
 import { qlentLanguage, qlentLinter } from '../../codemirror-lang-qlent';
 import HooksTab from './HooksTab';
 import OwnerAdminEditor from '../operators/OwnerAdminEditor';
+import AddonPanel from '../addons/AddonPanel';
+import { resolveAddonIcon } from '../addons/addonIcons';
+import { useAddonMounts } from '../../contexts/AddonsContext';
 import { diffAdminLists } from '../../utils/adminChanges';
 import {
   canEnableLanRate,
   getLanRateUnsupportedMessage,
   isLanRateForcedOn,
 } from '../../utils/lanRateCompatibility';
+
+// The id the detached instance-config <form> is reached by (see its comment).
+const CONFIG_FORM_ID = 'edit-instance-config-form';
 
 const CONFIG_FILES_ORDER = ['server.cfg', 'mappool.txt', 'access.txt', 'workshop.txt'];
 
@@ -62,6 +69,11 @@ const getFactoryLinterSource = (fileName) => (
   fileName?.toLowerCase().endsWith('.factories') ? FACTORY_LINTER_SOURCE : null
 );
 const getServerHostname = (serverCfg = '') => serverCfg.match(/set sv_hostname "([^"]*)"/)?.[1] || '';
+const withServerHostname = (serverCfg = '', hostname) => (
+  /set sv_hostname "([^"]*)"/.test(serverCfg)
+    ? serverCfg.replace(/set sv_hostname "([^"]*)"/, () => `set sv_hostname "${hostname}"`)
+    : `${serverCfg}\nset sv_hostname "${hostname}"`
+);
 const setsEqual = (a, b) => a.size === b.size && [...a].every(value => b.has(value));
 
 // Mapping between frontend config keys and backend preset API keys
@@ -107,6 +119,7 @@ function EditInstanceConfigModal({
   const [hostOsType, setHostOsType] = useState(null);
   const [hostLanRateUsesHook, setHostLanRateUsesHook] = useState(false);
   const [hostRuntime, setHostRuntime] = useState('minqlx');
+  const [hostId, setHostId] = useState(null);
 
   // Restart on Save state
   const [restartAfterSave, setRestartAfterSave] = useState(true);
@@ -141,6 +154,9 @@ function EditInstanceConfigModal({
 
   // Scripts tab state
   const [activeMainTab, setActiveMainTab] = useState(initialTab); // 'config' | 'scripts' | 'factories' | 'hooks' | 'admins'
+
+  // Addon-contributed tabs (empty when no addon declares instance_tabs)
+  const addonTabs = useAddonMounts('instance_tabs');
   const [checkedPlugins, setCheckedPlugins] = useState(new Set());
   const [initialCheckedPlugins, setInitialCheckedPlugins] = useState(new Set());
   const [scriptHostName, setScriptHostName] = useState(null);
@@ -153,6 +169,7 @@ function EditInstanceConfigModal({
   const [droppedPluginCount, setDroppedPluginCount] = useState(0);
   const [pluginNoticeDismissed, setPluginNoticeDismissed] = useState(false);
   const pluginFileManagerRef = useRef(null);
+  const { uploading, track: trackUploads } = useUploadBusy();
   const pluginsSyncedRef = useRef(false);
   const hookLoadSeqRef = useRef(0);
 
@@ -188,6 +205,7 @@ function EditInstanceConfigModal({
   });
 
   const { showSuccess, showError } = useNotification(); // Get notification functions
+  const hostPool = useHostPoolStatus(hostId, { enabled: activeMainTab === 'scripts', showError });
 
   const pluginsAdapter = useDraftAdapter({
     source: draftPreset ? 'preset' : 'instance',
@@ -426,6 +444,7 @@ function EditInstanceConfigModal({
           setHostOsType(instanceDetails.host_os_type || null);
           setHostLanRateUsesHook(instanceDetails.host_lan_rate_uses_hook === true);
           setHostRuntime(instanceDetails.host_runtime || 'minqlx');
+          setHostId(instanceDetails.host_id ?? null);
           setInstanceStatus(instanceDetails.status || null);
           const incomingFolders = Array.isArray(configData?.config_folders)
             ? configData.config_folders
@@ -513,7 +532,7 @@ function EditInstanceConfigModal({
   };
 
   const handleEditPluginCvars = useCallback((item, cvars) => {
-    setCvarsModalTarget({ label: getPluginDisplayLabel(item), cvars });
+    setCvarsModalTarget({ label: item.name, cvars });
   }, []);
 
   const handleSavePluginCvars = useCallback((nextConfig) => {
@@ -608,6 +627,11 @@ function EditInstanceConfigModal({
         const raw = newConfigs[file] ?? presetData[presetKey] ?? '';
         newConfigs[file] = file === 'server.cfg' ? stripManagedCvars(raw) : raw;
       });
+      // The instance keeps its own hostname: a preset carries settings, not
+      // the server's identity, so its sv_hostname is replaced with the current one.
+      if (serverHostname) {
+        newConfigs['server.cfg'] = withServerHostname(newConfigs['server.cfg'], serverHostname);
+      }
       resetConfigs(newConfigs, presetData.config_folders || []);
       // checked_factories: null = legacy preset (use all factory files); [] or [...] = explicit selection
       const factoriesToLoad = presetData.checked_factories != null
@@ -662,8 +686,9 @@ function EditInstanceConfigModal({
         setFactoryServerTree([]);
       }
 
-      const nextHostname = getServerHostname(newConfigs['server.cfg']);
-      setServerHostname(nextHostname);
+      if (!serverHostname) {
+        setServerHostname(getServerHostname(newConfigs['server.cfg']));
+      }
       setSelectedPresetId(presetId);
       setIsDirty(true);
 
@@ -675,7 +700,7 @@ function EditInstanceConfigModal({
   // pluginTree: partitionCheckedPaths folds in a plugin's depends_on from the
   // tree, so a stale [] silently degrades a preset load to the pre-manifest
   // behaviour of dropping those dependencies.
-  }, [hostLanRateUsesHook, hostOsType, hostRuntime, originalLanRateEnabled, pluginTree, resetConfigs, resetFactories, showSuccess]);
+  }, [hostLanRateUsesHook, hostOsType, hostRuntime, originalLanRateEnabled, pluginTree, resetConfigs, resetFactories, serverHostname, showSuccess]);
 
   const handleLoadPreset = useCallback(async (presetId) => {
     setPresetError(null);
@@ -852,6 +877,7 @@ function EditInstanceConfigModal({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (uploading) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -1078,7 +1104,16 @@ function EditInstanceConfigModal({
                         </div>
                       </div>
                     ) : (
-                      <form onSubmit={handleSubmit} className="flex flex-col flex-grow min-h-0">
+                      <div className="flex flex-col flex-grow min-h-0">
+                        {/* The config form is a detached element that the
+                            hostname input and the Save Configuration button
+                            join through their `form` attribute, instead of a
+                            <form> wrapped around the whole dialog body. An
+                            addon tab renders its own <form> in the content
+                            area below; nested inside this one it was invalid
+                            HTML, and its Save button reloaded the page instead
+                            of saving. */}
+                        <form id={CONFIG_FORM_ID} onSubmit={handleSubmit} className="hidden" />
                         <div className="mb-2 lg:mb-4 flex-shrink-0">
                           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
                             {/* Server Hostname Input */}
@@ -1091,6 +1126,7 @@ function EditInstanceConfigModal({
                                   type="text"
                                   name="serverHostname"
                                   id="serverHostname"
+                                  form={CONFIG_FORM_ID}
                                   value={serverHostname}
                                   onChange={handleHostnameChange}
                                   maxLength={64}
@@ -1193,6 +1229,13 @@ function EditInstanceConfigModal({
                             { key: 'factories', icon: LayoutGrid, label: 'Factories' },
                             { key: 'hooks', icon: Webhook, label: 'Hooks' },
                             { key: 'admins', icon: Crown, label: 'Owner & Admins' },
+                            // Addon tabs come last so a newly installed addon
+                            // never reorders the tabs an operator already knows.
+                            ...addonTabs.map((mount) => ({
+                              key: `addon:${mount.key}`,
+                              icon: resolveAddonIcon(mount.icon),
+                              label: mount.label,
+                            })),
                           ].map((tab) => (
                             <button
                               key={tab.key}
@@ -1214,6 +1257,7 @@ function EditInstanceConfigModal({
                           <div className={activeMainTab === 'config' ? 'flex-1 min-h-0' : 'hidden'}>
                             <FileManager
                               adapter={configsAdapter}
+                              onUploadingChange={trackUploads('config')}
                               capabilities={CONFIG_CAPS}
                               defaultSelectedPath="server.cfg"
                               onExpandEditor={handleExpandEditor}
@@ -1230,6 +1274,7 @@ function EditInstanceConfigModal({
                               <FileManager
                                 ref={pluginFileManagerRef}
                                 adapter={pluginsAdapter}
+                                onUploadingChange={trackUploads('plugins')}
                                 capabilities={PLUGIN_CAPS}
                                 checkable
                                 checkedFiles={checkedPlugins}
@@ -1243,12 +1288,17 @@ function EditInstanceConfigModal({
                                   contextKey: String(instanceId),
                                 }}
                                 onEditCvars={handleEditPluginCvars}
+                                missingOnHost={hostPool.missing}
+                                onPushToHost={hostPool.push}
+                                pushingToHost={hostPool.pushing}
+                                hostPoolUnavailable={hostPool.state === 'unavailable'}
                               />
                             </div>
                           </div>
                           <div className={activeMainTab === 'factories' ? 'flex-1 min-h-0' : 'hidden'}>
                             <FileManager
                               adapter={factoriesAdapter}
+                              onUploadingChange={trackUploads('factories')}
                               capabilities={FACTORY_CAPS}
                               checkable
                               checkedFiles={checkedFactories}
@@ -1276,7 +1326,7 @@ function EditInstanceConfigModal({
                             </div>
                           )}
                           {/* Kept mounted: OwnerAdminEditor fills the operators cache the access.txt autocomplete reads. */}
-                          <div className={activeMainTab === 'admins' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+                          <div className={activeMainTab === 'admins' ? 'flex-1 min-h-0 overflow-y-auto scrollbar-thick pr-3 mr-0.5' : 'hidden'}>
                             <OwnerAdminEditor
                               serverCfgContent={serverCfgContent}
                               onServerCfgChange={handleServerCfgOwnerChange}
@@ -1287,6 +1337,19 @@ function EditInstanceConfigModal({
                               adminsPreload={adminsPreload}
                             />
                           </div>
+                          {addonTabs.map((mount) => (
+                            activeMainTab === `addon:${mount.key}` && (
+                              <div key={mount.key} className="flex-1 min-h-0 overflow-y-auto">
+                                <AddonPanel
+                                  addon={mount.addon}
+                                  entry={mount.entry}
+                                  panel={mount.panel}
+                                  scope={mount.scope}
+                                  scopeId={instanceId}
+                                />
+                              </div>
+                            )
+                          ))}
                         </div>
 
                         <div className="mt-4 flex justify-between items-center flex-shrink-0">
@@ -1319,21 +1382,28 @@ function EditInstanceConfigModal({
                             <button type="button" onClick={handleAttemptClose} className="btn btn-secondary">
                               Cancel
                             </button>
-                            <button
-                              type="submit"
-                              disabled={saving || loading}
-                              className="btn btn-primary"
-                            >
-                              {saving ? (
-                                <span className="flex items-center">
-                                  <LoaderCircle size={16} className="animate-spin mr-2" />
-                                  Saving...
-                                </span>
-                              ) : 'Save Configuration'}
-                            </button>
+                            {/* An addon tab saves through its own button and
+                                is no part of the instance config, so offering
+                                Save Configuration there would read as "save
+                                this tab" and could restart the instance. */}
+                            {!activeMainTab.startsWith('addon:') && (
+                              <button
+                                type="submit"
+                                form={CONFIG_FORM_ID}
+                                disabled={saving || loading || uploading}
+                                className="btn btn-primary"
+                              >
+                                {saving ? (
+                                  <span className="flex items-center">
+                                    <LoaderCircle size={16} className="animate-spin mr-2" />
+                                    Saving...
+                                  </span>
+                                ) : 'Save Configuration'}
+                              </button>
+                            )}
                           </div>
                         </div>
-                      </form>
+                      </div>
                     )}
                   </div>
                 </Dialog.Panel>

@@ -899,6 +899,38 @@ export const downloadPluginRepositoryPlugins = async (repoId, filenames, runtime
   }
 };
 
+export const getPluginRepositoryDiff = async (repoId, filename, runtime) => {
+  try {
+    const params = new URLSearchParams({ filename });
+    if (runtime) params.append('runtime', runtime);
+    const response = await apiClient.get(`/plugin-repositories/${repoId}/diff?${params}`);
+    return response.data.data;
+  } catch (error) {
+    console.error(`Failed to diff ${filename} from plugin repository ${repoId}:`, error.response ? error.response.data : error.message);
+    throw error.response ? error.response.data : new Error(`Failed to diff ${filename}`);
+  }
+};
+
+export const installPluginRepositoryAddon = async (repoId, addonId) => {
+  try {
+    const response = await apiClient.post(`/plugin-repositories/${repoId}/install-addon`, { id: addonId });
+    return response.data;
+  } catch (error) {
+    console.error(`Failed to install addon from repository ${repoId}:`, error.response ? error.response.data : error.message);
+    throw error.response ? error.response.data : new Error(`Failed to install addon from repository ${repoId}`);
+  }
+};
+
+export const getPluginRepositoryUpdates = async () => {
+  try {
+    const response = await apiClient.get('/plugin-repositories/updates');
+    return response.data.data;
+  } catch (error) {
+    console.error('Failed to fetch repository update status:', error.response ? error.response.data : error.message);
+    throw error.response ? error.response.data : new Error('Failed to fetch repository update status');
+  }
+};
+
 // Script Management APIs
 export const getScriptTree = async ({ preset, host, instanceId } = {}) => {
   try {

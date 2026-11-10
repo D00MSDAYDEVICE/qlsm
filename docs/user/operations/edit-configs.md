@@ -11,6 +11,8 @@ The **Config** tab uses the file manager. These protected baseline files are alw
 
 Protected files can be edited, but they cannot be renamed or deleted. You can also add custom flat `.cfg` and `.txt` files with **New** or **Upload**. Custom config files can be renamed or deleted.
 
+In `workshop.txt`, hover over a Workshop item ID to preview the item: its thumbnail, title, and a short description from Steam, with an **Open in Steam** link to the full Workshop page. Unknown IDs show **Workshop item not found**.
+
 You can also create **subfolders** (one level deep) to hold `.ent` entity override files. Use the **New** dropdown and choose **New Folder** to create a subfolder, then add `.ent` files inside it. Subfolders and the `.ent` files within them can be renamed or deleted via the row context menu (⋮).
 
 ![](../images/instance-edit-config.png)
@@ -165,10 +167,10 @@ The `Plugins` tab manages Python plugins for this instance:
 
 ### Shared Plugins
 
-The list also includes plugins from QLSM's shared plugin folder for the host's runtime (`ql-assets/data/minqlx-plugins/` or `ql-assets/data/minqlxtended-plugins/`) that this instance or preset doesn't have its own copy of. They're marked **shared**. That covers plugins you download from a [plugin repository](plugin-repositories.md).
+The list also includes plugins from QLSM's shared plugin folder for the host's runtime that this instance or preset doesn't have its own copy of. That folder is the plugins QLSM ships with, plus anything in `data/shared-plugins/minqlx/` or `data/shared-plugins/minqlxtended/` under your QLSM install (a downloaded plugin with the same name as a built-in one takes its place). They're marked **shared**. That covers plugins you download from a [plugin repository](plugin-repositories.md).
 
 - Tick a shared plugin like any other. Deploying copies it from the host's shared folder into the instance.
-- A new shared plugin must reach the host first: run [Check for Updates](check-for-updates.md) on the host after downloading it. Otherwise the server can't find it when it starts.
+- A shared plugin must be on the host before you enable it. A row marked **not on host** in place of **shared** is not there yet: click the upload icon next to it to push QLSM's shared folder to the host, or run [Check for Updates](check-for-updates.md). The badge clears once the host has the file. If the host is not Active or cannot be reached, the tab says "Host pool status unavailable" and shows no badges.
 - Shared plugins can't be renamed or deleted here, but you can view their code.
 - Editing a shared plugin's code saves a copy into this instance or preset. The row then loses its **shared** mark, and this configuration keeps its own copy instead of receiving updates to the shared one.
 - When the instance or preset has its own file with the same name, only that copy is listed.
@@ -202,7 +204,7 @@ When validation fails, QLSM shows line-level errors above the editor. Fix the re
 
 A plugin can ship an optional `<plugin>.ql-plugin.json` file next to its `.py` file with metadata QLSM reads and displays — none of this is required for the plugin to work as a plain checkbox.
 
-The central plugin pool (`ql-assets/data/minqlx-plugins/`) is the source of truth: if it has a manifest for a plugin with that filename, that's what's used everywhere the plugin appears — a preset or instance's own copy is not checked, even if it has its own (possibly outdated) sidecar. A local sidecar only applies as a fallback for a plugin the pool doesn't have at all, e.g. a custom/one-off plugin written directly for one preset or instance. This means metadata for a pool plugin can't drift between presets and instances, and updating the pool's manifest (adding `cvars`, for example) applies everywhere immediately, including already-deployed instances, without re-copying anything by hand.
+The central plugin pool (QLSM's built-in plugins plus your downloaded ones in `data/shared-plugins/`) is the source of truth: if it has a manifest for a plugin with that filename, that's what's used everywhere the plugin appears — a preset or instance's own copy is not checked, even if it has its own (possibly outdated) sidecar. A local sidecar only applies as a fallback for a plugin the pool doesn't have at all, e.g. a custom/one-off plugin written directly for one preset or instance. This means metadata for a pool plugin can't drift between presets and instances, and updating the pool's manifest (adding `cvars`, for example) applies everywhere immediately, including already-deployed instances, without re-copying anything by hand.
 
 If that file declares a `cvars` list, a settings (gear) icon appears next to the plugin's row. Click it to edit the plugin's cvars directly, instead of hand-editing `server.cfg`:
 

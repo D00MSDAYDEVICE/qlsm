@@ -15,14 +15,18 @@ from flask import current_app
 PLUGIN_MANIFEST_SUFFIX = '.ql-plugin.json'
 PLUGIN_MANIFEST_MAX_SIZE = 16 * 1024  # 16KB — metadata only, not a data file
 
-# Central plugin pool, same one ansible/backup use (see
-# ui/task_logic/backup_files.py MINQLX_PLUGINS_DIR). Manifest fallback source:
-# a preset/instance copy of a plugin can predate manifests entirely, or have
-# been uploaded/customized without its own sidecar — falling back to the pool
-# by filename means the manifest still shows up wherever the plugin does,
-# without needing every preset/instance copy kept in sync by hand.
+# Central plugin pool, two tiers per runtime (see ui/plugin_pool.py): the
+# built-in tier shipped in the image, and the operator tier under data/ that
+# repository downloads write to. Manifest fallback source: a preset/instance
+# copy of a plugin can predate manifests entirely, or have been
+# uploaded/customized without its own sidecar — falling back to the pool by
+# filename means the manifest still shows up wherever the plugin does,
+# without needing every preset/instance copy kept in sync by hand. Module
+# constants rather than plugin_pool calls so tests can point them at temp dirs.
 MINQLX_PLUGINS_POOL_DIR = os.path.join('ql-assets', 'data', 'minqlx-plugins')
 MINQLXTENDED_PLUGINS_POOL_DIR = os.path.join('ql-assets', 'data', 'minqlxtended-plugins')
+MINQLX_OPERATOR_POOL_DIR = os.path.join('data', 'shared-plugins', 'minqlx')
+MINQLXTENDED_OPERATOR_POOL_DIR = os.path.join('data', 'shared-plugins', 'minqlxtended')
 
 
 def _pool_dirs(runtime=None):
@@ -33,16 +37,16 @@ def _pool_dirs(runtime=None):
     other), so an instance's own runtime pool has to win when we know it. The
     other pool is still tried afterwards: stale-but-close metadata is more
     useful than none, and it is what this lookup did before runtimes were
-    split at all."""
+    split at all. Within a runtime the operator tier comes before the
+    built-in one, matching how every other pool reader resolves a name."""
     from ui.runtime import MINQLXTENDED, is_valid_runtime  # local import: no import cycle at module load
 
+    minqlx_pools = [MINQLX_OPERATOR_POOL_DIR, MINQLX_PLUGINS_POOL_DIR]
+    minqlxtended_pools = [MINQLXTENDED_OPERATOR_POOL_DIR, MINQLXTENDED_PLUGINS_POOL_DIR]
     ordered = []
     if is_valid_runtime(runtime):
-        ordered.append(
-            MINQLXTENDED_PLUGINS_POOL_DIR if runtime.strip().lower() == MINQLXTENDED
-            else MINQLX_PLUGINS_POOL_DIR
-        )
-    for pool in (MINQLX_PLUGINS_POOL_DIR, MINQLXTENDED_PLUGINS_POOL_DIR):
+        ordered.extend(minqlxtended_pools if runtime.strip().lower() == MINQLXTENDED else minqlx_pools)
+    for pool in minqlx_pools + minqlxtended_pools:
         if pool not in ordered:
             ordered.append(pool)
     return [os.path.abspath(pool) for pool in ordered]

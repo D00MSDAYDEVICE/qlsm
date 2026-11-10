@@ -26,6 +26,7 @@ vi.mock('axios', () => ({
 import {
   fetchInstanceHooks,
   fetchInstanceMinqlxLogs,
+  getPluginRepositoryDiff,
   getPresetById,
   getSelfHostDefaults,
   importPreset,
@@ -231,5 +232,21 @@ describe('importPreset', () => {
       expect.any(FormData),
       { headers: { 'Content-Type': 'multipart/form-data' } },
     );
+  });
+});
+
+describe('getPluginRepositoryDiff', () => {
+  beforeEach(() => {
+    mocks.get.mockReset();
+  });
+
+  it('sends runtime only when one is given', async () => {
+    mocks.get.mockResolvedValue({ data: { data: { local: 'a', remote: 'b' } } });
+
+    await getPluginRepositoryDiff(7, 'autokick.py', null);
+    expect(mocks.get).toHaveBeenLastCalledWith('/plugin-repositories/7/diff?filename=autokick.py');
+
+    await getPluginRepositoryDiff(7, 'autokick.py', 'minqlx');
+    expect(mocks.get).toHaveBeenLastCalledWith('/plugin-repositories/7/diff?filename=autokick.py&runtime=minqlx');
   });
 });

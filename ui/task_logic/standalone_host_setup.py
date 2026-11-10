@@ -9,7 +9,7 @@ from ui.constants import GAME_UDP_PORTS, RCON_TCP_PORTS
 from ui.models import Host, HostStatus
 from ui.runtime import host_runtime
 from ui.task_logic.self_host_network import resolve_self_host_management_target
-from .common import append_log
+from .common import append_log, record_host_error
 from .standalone_inventory import generate_standalone_inventory
 
 log = logging.getLogger(__name__)
@@ -105,6 +105,11 @@ def setup_standalone_host_logic(host_id, rerun=False):
         if not _run_setup_playbook(host, inventory_path):
             return f"Error during Ansible host setup for host {host_id}"
 
+        # Same addon payload sync a cloud host's setup gets (host.payload_sync
+        # hook), before the reconcile below restarts instances.
+        from .ansible_host_setup import _dispatch_addon_payload_sync
+        _dispatch_addon_payload_sync(host)
+
         # Success
         if host.provider != 'self':
             host.redis_unix_socket = True
@@ -130,14 +135,11 @@ def setup_standalone_host_logic(host_id, rerun=False):
     except Exception as e:
         log.exception(f"Unhandled exception in setup_standalone_host_logic for host_id {host_id}: {e}")
         if host:
-            try:
-                if host.status != HostStatus.ERROR:
-                    host.status = HostStatus.ERROR
-                append_log(host, f"Task failed with unhandled exception: {e}")
-                db.session.commit()
-            except Exception as commit_err:
-                log.error(f"Failed to update host status/log on unhandled exception: {commit_err}")
-        return f"Error during standalone host {host_id} setup: {e}"
+            record_host_error(host_id, f"Task failed with unhandled exception: {e}")
+        # Raise instead of returning a string: RQ would report the run as a
+        # success, and nothing would show that the host never left CONFIGURING.
+        # The RQ entry points release their locks in a finally block.
+        raise
 
 
 def _generate_standalone_inventory(host):
@@ -222,6 +224,10 @@ def _setup_playbook_extra_vars(host):
         extra_vars['use_host_redis'] = 'false'
     if host.timezone:
         extra_vars['host_timezone'] = host.timezone
+    if getattr(host, 'runtime_deps_isolated', False):
+        # Upgraded host: instances use their own venvs, so the common pool
+        # sync must not pip-install into the system Python.
+        extra_vars['skip_pip_install'] = True
     return extra_vars
 
 
@@ -236,7 +242,11 @@ def _run_setup_playbook(host, inventory_path):
     # One JSON --extra-vars object: the bare `-e key=value` form stringifies
     # (and whitespace-splits) list values, which silently corrupts the firewall
     # port lists. Scalars stay strings here, exactly as the old form produced.
-    ansible_command_args += ['-e', json.dumps(_setup_playbook_extra_vars(host))]
+    core_extra_vars = _setup_playbook_extra_vars(host)
+    ansible_command_args += ['-e', json.dumps(core_extra_vars)]
+    # Same addon contributions a cloud host's setup gets (host.setup hook).
+    from .ansible_host_setup import addon_setup_extravar_args
+    ansible_command_args += addon_setup_extravar_args(host, core_keys=core_extra_vars)
     ansible_command_args.append(ansible_playbook_path)
 
     log.info(f"Executing Ansible command: {' '.join(ansible_command_args)}")

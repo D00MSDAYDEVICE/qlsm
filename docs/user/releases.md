@@ -6,6 +6,58 @@ QLSM uses `v<major>.<minor>.<patch>` tags. Every merged pull request is listed a
 
 | Version | Date | PR | Changes |
 | --- | --- | --- | --- |
+| `v1.54.1` | 2026-11-09 | [#271](https://github.com/dngrtech/qlsm/pull/271) | In the Upgrade to minqlxtended dialog, plugins an instance doesn't have enabled are now marked **Not enabled**, greyed out, and listed after enabled ones, so they no longer look like they'd break a running server. |
+| `v1.54.0` | 2026-11-08 | [#269](https://github.com/dngrtech/qlsm/pull/269) | minqlxtended hosts are now built with server-side demo capture (minqlxtended PR #8, with a one-line fix) applied on top of the pinned minqlxtended release, plus a guard that stops the server crashing when a bot sends a command while a match restarts. Hosts pick it up the next time they are set up or rebuilt. |
+| `v1.53.0` | 2026-11-07 | [#268](https://github.com/dngrtech/qlsm/pull/268) | New minqlx hosts on Vultr are now deployed on Ubuntu 24.04, so they can be upgraded to minqlxtended. |
+| `v1.52.0` | 2026-11-04 | [#267](https://github.com/dngrtech/qlsm/pull/267) | Existing minqlx hosts on Ubuntu 24.04 or newer can now be upgraded to minqlxtended from the host actions menu, with automatic rollback if anything fails. |
+| `v1.51.2` | 2026-11-03 | [#266](https://github.com/dngrtech/qlsm/pull/266) | Hosts created before v1.51.0 now show their OS version too. Self deployments get it after updating with `qlsm-install.sh --update`. |
+| `v1.51.1` | 2026-11-03 | [#265](https://github.com/dngrtech/qlsm/pull/265) | Pull request reviews now run several specialised Claude reviewers in parallel, and a verifier checks their findings before anything is posted. This is a development-only change with no effect on the running app. |
+| `v1.51.0` | 2026-11-01 | [#264](https://github.com/dngrtech/qlsm/pull/264) | The host drawer now shows **OS** with the version (for example Ubuntu 24.04) instead of **OS Type**. Hosts created before this release show the distribution only. |
+| `v1.50.4` | 2026-10-25 | [#262](https://github.com/dngrtech/qlsm/pull/262) | `setup-worktree.sh` now lists the default plugin repositories on new worktrees. |
+| `v1.50.3` | 2026-10-23 | [#261](https://github.com/dngrtech/qlsm/pull/261) | Fixed the `lgacc` plugin's accuracy messages leaving players stuck or glitching after a death, and its numbers going wrong when `reset_acc` auto-reset is on. |
+| `v1.50.2` | 2026-10-23 | [#256](https://github.com/dngrtech/qlsm/pull/256) | Loading a preset keeps the server hostname. |
+| `v1.50.1` | 2026-10-22 | [#260](https://github.com/dngrtech/qlsm/pull/260) | Fixed `setup-worktree.sh` failing on macOS and picking an unsupported Python version. |
+| `v1.50.0` | 2026-10-22 | [#259](https://github.com/dngrtech/qlsm/pull/259) | New installs also list the **ark-ql Plugins Repository** plugin repository under **Settings → Plugin Repositories**. |
+| `v1.49.0` | 2026-10-22 | [#258](https://github.com/dngrtech/qlsm/pull/258) | Added the `lgacc` plugin: after each kill or death, shows you your lightning gun accuracy for that life and your opponent's, visible only to you. `!lgacc` toggles it and `!lgacc enemy` toggles the enemy line. |
+| `v1.48.5` | 2026-10-22 | [#255](https://github.com/dngrtech/qlsm/pull/255) | Instances no longer stay stuck or flip to Error when a worker restart interrupts a job; the real server state is now detected. |
+| `v1.48.4` | 2026-10-22 | [#257](https://github.com/dngrtech/qlsm/pull/257) | Save is now held while any file upload is in progress on the Configuration Files, Plugins and Factories tabs. |
+| `v1.48.3` | 2026-10-21 | [#254](https://github.com/dngrtech/qlsm/pull/254) | Fixed Save not waiting for in-progress plugin uploads, which could leave uploaded files out of the deployment. |
+| `v1.48.2` | 2026-10-21 | [#253](https://github.com/dngrtech/qlsm/pull/253) | Fixed nickname lifecycle bugs in the names plugin for both minqlx and minqlxtended. |
+| `v1.48.1` | 2026-10-21 | [#252](https://github.com/dngrtech/qlsm/pull/252) | Autokick now rejects players whose nickname matches the regex patterns when they connect. |
+| `v1.48.0` | 2026-10-20 | [#251](https://github.com/dngrtech/qlsm/pull/251) | Added stored notifications, a navbar bell, and addon hooks, navigation, and menu status extensions; improved standalone host onboarding, setup error handling, and plugin helper-package updates. |
+| `v1.47.9` | 2026-10-13 | [#250](https://github.com/dngrtech/qlsm/pull/250) | Increased and made configurable the web request-thread pool so open Socket.IO connections do not exhaust the previous 12-thread capacity and stall the Servers page. |
+| `v1.47.8` | 2026-10-13 | [#247](https://github.com/dngrtech/qlsm/pull/247) | Fixed live status and player counts not showing for game hosts running Python 3.14. |
+| `v1.47.7` | 2026-10-12 | [#249](https://github.com/dngrtech/qlsm/pull/249) | Fixed the **Restart QLSM** reminder disappearing after dismissing the prompt or reinstalling an addon at the same version; a **Restart QLSM** button now stays in the top bar until QLSM restarts. |
+| `v1.47.6` | 2026-10-12 | [#248](https://github.com/dngrtech/qlsm/pull/248) | Addon payload sync now reaches standalone and self hosts. |
+| `v1.47.5` | 2026-10-12 | [#245](https://github.com/dngrtech/qlsm/pull/245) | Fixed addon playbooks failing to run when pushing an addon's host configuration. |
+| `v1.47.4` | 2026-10-10 | [#246](https://github.com/dngrtech/qlsm/pull/246) | Added a hosted **Repository Manifest Editor** so anyone can build a `qlsm-repository.json` for their plugin repository without running QLSM. |
+| `v1.47.3` | 2026-10-07 | [#243](https://github.com/dngrtech/qlsm/pull/243) | Fixed **Restart QLSM** sometimes staying on "Restarting…" forever, and reloading the page before the restarted QLSM was actually serving. |
+| `v1.47.2` | 2026-10-07 | [#242](https://github.com/dngrtech/qlsm/pull/242) | Bug fixes and improvements. |
+| `v1.47.1` | 2026-10-03 | [#241](https://github.com/dngrtech/qlsm/pull/241) | Bug fixes and improvements. |
+| `v1.47.0` | 2026-10-03 | [#240](https://github.com/dngrtech/qlsm/pull/240) | Addon setup hooks now apply to standalone and self hosts. |
+| `v1.46.2` | 2026-10-02 | [#239](https://github.com/dngrtech/qlsm/pull/239) | Bug fixes and improvements. |
+| `v1.46.1` | 2026-10-01 | [#238](https://github.com/dngrtech/qlsm/pull/238) | Bug fixes and improvements. |
+| `v1.46.0` | 2026-10-01 | [#237](https://github.com/dngrtech/qlsm/pull/237) | Addons can add their own columns to the **Live Status** player table, such as a player rating. |
+| `v1.45.1` | 2026-09-29 | — | Bug fixes and improvements. |
+| `v1.45.0` | 2026-09-25 | [#235](https://github.com/dngrtech/qlsm/pull/235) | Suggest console commands and cvar names as you type in the **RCON Console** and **Global RCON**. |
+| `v1.44.0` | 2026-09-22 | [#234](https://github.com/dngrtech/qlsm/pull/234) | Restart QLSM from the UI to activate addons installed at runtime. |
+| `v1.43.0` | 2026-09-22 | [#233](https://github.com/dngrtech/qlsm/pull/233) | Install and update addons straight from a plugin repository, and let a plugin ship extra files in a subfolder via `package_files`. |
+| `v1.42.0` | 2026-09-21 | [#230](https://github.com/dngrtech/qlsm/pull/230) | Add an addon system for extending QLSM with installable packages, contributing their own UI panels, settings, and API endpoints. |
+| `v1.41.1` | 2026-09-21 | [#231](https://github.com/dngrtech/qlsm/pull/231) | Add a pill-shaped drag handle to the file-list splitter in the config/plugins/factories editor. |
+| `v1.41.0` | 2026-09-21 | [#225](https://github.com/dngrtech/qlsm/pull/225) | Edit a plugin repository's `qlsm-plugins.json` under **Settings → Plugin Repositories** — reorder its plugins, edit their cvars and commands, see what QLSM would drop from the file, and download the result to commit to the repository. |
+| `v1.40.6` | 2026-09-21 | [#229](https://github.com/dngrtech/qlsm/pull/229) | Bug fixes and improvements. |
+| `v1.40.5` | 2026-09-18 | [#227](https://github.com/dngrtech/qlsm/pull/227) | Bug fixes and improvements. |
+| `v1.40.4` | 2026-09-18 | [#226](https://github.com/dngrtech/qlsm/pull/226) | Server actions now wait while a backup export or restore is running, so they can't change files or data mid-restore. |
+| `v1.40.3` | 2026-09-17 | [#224](https://github.com/dngrtech/qlsm/pull/224) | Drop Source Engine query floods before they reach Quake Live servers. |
+| `v1.40.2` | 2026-09-17 | — | Bug fixes and improvements. |
+| `v1.40.1` | 2026-09-17 | [#223](https://github.com/dngrtech/qlsm/pull/223) | Bug fixes and improvements. |
+| `v1.40.0` | 2026-09-17 | [#222](https://github.com/dngrtech/qlsm/pull/222) | Hover over a Workshop item ID in `workshop.txt` to preview its thumbnail, title and description from Steam. |
+| `v1.39.2` | 2026-09-17 | [#221](https://github.com/dngrtech/qlsm/pull/221) | Bug fixes and improvements. |
+| `v1.39.1` | 2026-09-17 | [#220](https://github.com/dngrtech/qlsm/pull/220) | List every plugin by filename in the **Plugins** tab (a plugin's friendly name now shows in its info tooltip), and show the filename next to each plugin's name under **Settings → Plugin Repositories**. |
+| `v1.39.0` | 2026-09-17 | [#219](https://github.com/dngrtech/qlsm/pull/219) | New installs list the **Doomsday's Plugins Repository** plugin repository under **Settings → Plugin Repositories** out of the box. |
+| `v1.38.0` | 2026-09-17 | [#218](https://github.com/dngrtech/qlsm/pull/218) | Push a downloaded plugin to every active host of its runtime automatically, and mark shared plugins the host does not have yet with a **not on host** badge and a push button in the **Plugins** tab. |
+| `v1.37.1` | 2026-09-16 | [#217](https://github.com/dngrtech/qlsm/pull/217) | Store plugins downloaded from a plugin repository in `data/shared-plugins/<runtime>/` so they reach your hosts and survive updates. Plugins downloaded before this version must be downloaded again. |
+| `v1.37.0` | 2026-09-16 | [#215](https://github.com/dngrtech/qlsm/pull/215) | Pick per file what to overwrite when a plugin download finds an existing file, and compare the server's copy with the repository's side by side first. Also fixes the "502 Bad gateway" error shown behind Cloudflare instead of the overwrite prompt. |
 | `v1.36.0` | 2026-09-16 | [#214](https://github.com/dngrtech/qlsm/pull/214) | Describe every plugin's cvars and commands inline in a repository's single `qlsm-plugins.json` instead of one manifest file per plugin. |
 | `v1.35.0` | 2026-09-15 | [#207](https://github.com/dngrtech/qlsm/pull/207) | Add plugin manifests with editable plugin cvars in the **Plugins** tab, external plugin repositories, and cvar/command autocomplete in the config editor. |
 | `v1.34.2` | 2026-09-14 | [#213](https://github.com/dngrtech/qlsm/pull/213) | Count only admins shown in a level card in the **Server Admins** badge. |

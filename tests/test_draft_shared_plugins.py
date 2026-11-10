@@ -34,8 +34,23 @@ def pool(tmp_path, monkeypatch):
     (root / 'helpers' / 'util.py').write_text('# helper\n')
     (root / 'hello_qlsm.ql-plugin.json').write_text('{"label": "Hello QLSM"}')
     monkeypatch.setattr('ui.plugin_pool.POOL_BASE', str(base))
+    monkeypatch.setattr('ui.plugin_pool.OPERATOR_POOL_BASE', str(tmp_path / 'operator'))
     monkeypatch.setattr('ui.plugin_manifest.MINQLXTENDED_PLUGINS_POOL_DIR', str(root))
     monkeypatch.setattr('ui.plugin_manifest.MINQLX_PLUGINS_POOL_DIR', str(tmp_path / 'no-minqlx-pool'))
+    monkeypatch.setattr('ui.plugin_manifest.MINQLXTENDED_OPERATOR_POOL_DIR', str(tmp_path / 'operator' / 'minqlxtended'))
+    monkeypatch.setattr('ui.plugin_manifest.MINQLX_OPERATOR_POOL_DIR', str(tmp_path / 'operator' / 'minqlx'))
+    return root
+
+
+@pytest.fixture
+def operator_pool(tmp_path, pool):
+    """The operator tier for the same runtime: one download-only plugin and
+    one that shadows a built-in."""
+    root = tmp_path / 'operator' / 'minqlxtended'
+    root.mkdir(parents=True)
+    (root / 'downloaded.py').write_text('# from a repo\n')
+    (root / 'downloaded.ql-plugin.json').write_text('{"label": "Downloaded"}')
+    (root / 'balance.py').write_text('# operator balance\n')
     return root
 
 
@@ -134,3 +149,45 @@ def test_editing_a_shared_plugin_makes_a_local_copy(client, auth_headers, pool, 
     assert len(hellos) == 1
     assert 'shared' not in hellos[0]
     assert (pool / 'hello_qlsm.py').read_text() == '# shared hello\n'
+
+
+def test_list_shared_plugins_merges_the_operator_tier_over_the_built_in_one(pool, operator_pool):
+    from ui.plugin_pool import resolve_pool_file, shared_plugin_path
+
+    shared = list_shared_plugins('minqlxtended')
+    assert set(shared) == {'hello_qlsm.py', 'balance.py', 'downloaded.py'}
+    assert shared['downloaded.py'] == str(operator_pool / 'downloaded.py')
+    assert shared['balance.py'] == str(operator_pool / 'balance.py')
+    assert shared['hello_qlsm.py'] == str(pool / 'hello_qlsm.py')
+    assert shared_plugin_path('minqlxtended', 'balance.py') == str(operator_pool / 'balance.py')
+    assert resolve_pool_file('minqlxtended', 'hello_qlsm.py') == str(pool / 'hello_qlsm.py')
+    assert resolve_pool_file('minqlxtended', 'missing.py') is None
+    assert resolve_pool_file('minqlxtended', 'helpers/util.py') is None
+
+
+def test_list_shared_plugins_without_an_operator_tier_is_just_the_built_in_one(pool):
+    assert set(list_shared_plugins('minqlxtended')) == {'hello_qlsm.py', 'balance.py'}
+
+
+def test_pool_file_hashes_prefer_the_operator_copy(pool, operator_pool):
+    from ui.plugin_pool import pool_file_hashes
+    from ui.update_checks import hash_file, PLUGIN_EXTENSIONS
+
+    hashes = pool_file_hashes('minqlxtended', extensions=PLUGIN_EXTENSIONS)
+    assert hashes['balance.py'] == hash_file(str(operator_pool / 'balance.py'))
+    assert hashes['downloaded.py'] == hash_file(str(operator_pool / 'downloaded.py'))
+    assert hashes['hello_qlsm.py'] == hash_file(str(pool / 'hello_qlsm.py'))
+    assert 'README.md' not in hashes
+    assert pool_file_hashes('bogus') == {}
+
+
+def test_operator_manifest_is_served_for_a_downloaded_shared_row(client, auth_headers, pool, operator_pool, preset):
+    draft_id = _draft(client, auth_headers, target_runtime='minqlxtended')
+    rows = {item['name']: item for item in _tree(client, auth_headers, draft_id)}
+    assert rows['downloaded.py']['shared'] is True
+    assert rows['downloaded.py']['plugin_manifest'] == {'label': 'Downloaded'}
+    # The operator copy of balance.py is shadowed by the preset's own file.
+    assert 'shared' not in rows['balance.py'] or rows['balance.py'].get('shared') is not True
+    resp = client.get(f'/api/drafts/{draft_id}/content?path=downloaded.py', headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.get_json()['data']['content'] == '# from a repo\n'

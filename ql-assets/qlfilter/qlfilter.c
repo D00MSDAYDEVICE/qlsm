@@ -12,6 +12,9 @@
 #define htons(x) ((__be16)___constant_swab16((x)))
 #define htonl(x) ((__be32)___constant_swab32((x)))
 
+#define QL_PORT_MIN 27960
+#define QL_PORT_MAX 27979
+
 SEC("prog")
 int xdp_drop_q3ql_udp_reflections(struct xdp_md *ctx)
 {
@@ -25,20 +28,31 @@ int xdp_drop_q3ql_udp_reflections(struct xdp_md *ctx)
 	}
 
 	uint16_t h_proto = eth->h_proto;
-	int i;
 
 	// IPv4 Inspection
 	if (h_proto == htons(ETH_P_IP)) {
 		struct iphdr *iph = data + nh_off;
-		struct udphdr *udph = data + nh_off + sizeof(struct iphdr);
+		if ((void *)(iph + 1) > data_end) {
+			return XDP_PASS;
+		}
+		if (iph->version != 4 || iph->ihl < 5) {
+			return XDP_PASS;
+		}
+		uint32_t ip_header_len = (uint32_t)iph->ihl * 4;
+		if ((void *)iph + ip_header_len > data_end) {
+			return XDP_PASS;
+		}
+		struct udphdr *udph = (void *)iph + ip_header_len;
 		if (udph + 1 > (struct udphdr *)data_end) {
 			return XDP_PASS;
 		}
-		// If the destination port within the range 27960-27979 and the sourceport is under 1024, drop the packet.
-		if (iph->protocol == IPPROTO_UDP && udph->dest >= htons(27960) && udph->dest <= htons(27979)){
-			if (htons(udph->source) <= 1024){
-				return XDP_DROP;
-			} else if (htons(udph->source) == 1900){
+		// Drop reflected traffic sent to QL ports. Source/A2S queries must pass:
+		// Steam and in-game server browsers use them to list the server (#228).
+		uint16_t dest_port = __be16_to_cpu(udph->dest);
+		uint16_t src_port = __be16_to_cpu(udph->source);
+		if (iph->protocol == IPPROTO_UDP &&
+			dest_port >= QL_PORT_MIN && dest_port <= QL_PORT_MAX) {
+			if (src_port <= 1024 || src_port == 1900) {
 				return XDP_DROP;
 			} else {
 				return XDP_PASS;

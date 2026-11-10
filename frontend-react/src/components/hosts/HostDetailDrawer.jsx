@@ -1,6 +1,6 @@
 import React, { Fragment, useState, useEffect, useRef } from 'react';
 import { Transition } from '@headlessui/react';
-import { X, Zap, Copy, Check, PowerIcon, ShieldCheck, ShieldOff, Loader2, Pencil, LoaderCircle } from 'lucide-react';
+import { X, Zap, Copy, Check, PowerIcon, ShieldCheck, ShieldOff, Loader2, Pencil, LoaderCircle, ArrowUpCircle } from 'lucide-react';
 import { getHostById, deleteHost as apiDeleteHost, updateHost } from '../../services/api';
 import ConfirmationModal from '../ConfirmationModal';
 import { useNotification } from '../NotificationProvider';
@@ -53,7 +53,7 @@ const OS_TYPE_LABELS = {
 
 export default function HostDetailDrawer({
   host, open, onClose, onDeleteHost, onHostDeleted, onHostUpdated,
-  onSwitchToInstanceDrawer, onRequestRestart, onQlfilterAction
+  onSwitchToInstanceDrawer, onRequestRestart, onQlfilterAction, onOpenRuntimeUpgrade
 }) {
   const [internalHost, setInternalHost] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -61,6 +61,7 @@ export default function HostDetailDrawer({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [ipCopied, setIpCopied] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
+  const [applyNameToMachine, setApplyNameToMachine] = useState(false);
   const [editedName, setEditedName] = useState('');
   const [editedNameError, setEditedNameError] = useState(null);
   const [isUpdatingName, setIsUpdatingName] = useState(false);
@@ -132,9 +133,9 @@ export default function HostDetailDrawer({
   };
 
   const handleStartEditName = () => {
-    if (internalHost) { setEditedName(internalHost.name || ''); setIsEditingName(true); setTimeout(() => nameInputRef.current?.focus(), 0); }
+    if (internalHost) { setEditedName(internalHost.name || ''); setApplyNameToMachine(false); setIsEditingName(true); setTimeout(() => nameInputRef.current?.focus(), 0); }
   };
-  const handleCancelEditName = () => { setIsEditingName(false); setEditedName(''); setEditedNameError(null); };
+  const handleCancelEditName = () => { setIsEditingName(false); setEditedName(''); setEditedNameError(null); setApplyNameToMachine(false); };
 
   const handleSaveEditName = async () => {
     if (!internalHost) return;
@@ -145,7 +146,9 @@ export default function HostDetailDrawer({
     if (trimmedName === internalHost.name) { setIsEditingName(false); return; }
     setIsUpdatingName(true);
     try {
-      const response = await updateHost(internalHost.id, { name: trimmedName });
+      const payload = { name: trimmedName };
+      if (internalHost.is_standalone) payload.apply_to_machine = applyNameToMachine;
+      const response = await updateHost(internalHost.id, payload);
       const updatedName = response.data?.name || trimmedName;
       setInternalHost(prev => ({ ...prev, name: updatedName }));
       addNotification(`Host name updated to "${updatedName}".`, 'success');
@@ -247,6 +250,13 @@ export default function HostDetailDrawer({
                               </button>
                             </div>
                             {editedNameError && <p className="text-sm" style={{ color: 'var(--accent-danger)' }}>{editedNameError}</p>}
+                            {internalHost.is_standalone && (
+                              <label className="flex items-start gap-2 mt-1 text-xs text-theme-muted cursor-pointer">
+                                <input type="checkbox" className="mt-0.5" checked={applyNameToMachine}
+                                  onChange={(e) => setApplyNameToMachine(e.target.checked)} disabled={isUpdatingName} />
+                                <span>Also rename the machine itself (hostname, /etc/hosts). Leave off to change the name inside QLSM only.</span>
+                              </label>
+                            )}
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
@@ -276,8 +286,8 @@ export default function HostDetailDrawer({
                         {internalHost.is_standalone ? (
                           <>
                             <Field label="SSH Port">{internalHost.ssh_port || 22}</Field>
-                            <Field label="OS Type">
-                              {OS_TYPE_LABELS[internalHost.os_type] || internalHost.os_type || 'Unknown'}
+                            <Field label="OS">
+                              {[OS_TYPE_LABELS[internalHost.os_type] || internalHost.os_type || 'Unknown', internalHost.os_version].filter(Boolean).join(' ')}
                             </Field>
                             {internalHost.cpu_count > 0 && (
                               <Field label="Capacity">
@@ -387,6 +397,20 @@ export default function HostDetailDrawer({
                       className={`btn ${qlBtn.variant === 'primary' ? 'btn-primary' : 'btn-secondary'} gap-1.5`}>
                       <qlBtn.Icon size={14} className={qlBtn.loading ? 'animate-spin' : ''} /> {qlBtn.text}
                     </button>
+                    {internalHost?.runtime_upgrade?.visible && (() => {
+                      const upgradeDisabled = !internalHost.runtime_upgrade.enabled;
+                      return (
+                        <button type="button"
+                          onClick={() => { if (!upgradeDisabled) onOpenRuntimeUpgrade?.(internalHost.id); }}
+                          aria-disabled={upgradeDisabled}
+                          className={`btn btn-secondary gap-1.5 ${upgradeDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                          <ArrowUpCircle size={14} /> Upgrade to minqlxtended
+                          {upgradeDisabled && internalHost.runtime_upgrade.reason && (
+                            <InfoTooltip text={internalHost.runtime_upgrade.reason} size={13} />
+                          )}
+                        </button>
+                      );
+                    })()}
                     <button type="button" onClick={handleDeleteClick} disabled={internalHost?.status === 'deleting'} className="btn btn-danger gap-1.5">
                       {internalHost?.is_standalone ? 'Remove' : 'Delete'}
                     </button>

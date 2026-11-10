@@ -7,6 +7,7 @@ from ui.database import (
 )
 from ui.vultr_settings import is_vultr_configured
 from ui.runtime import DEFAULT_RUNTIME, VALID_RUNTIMES, is_valid_runtime, runtime_paths
+from ui.runtime_upgrade_guard import upgrade_block_response
 import re
 import os
 import datetime
@@ -107,7 +108,8 @@ def _validate_runtime(value):
 
     Returns (runtime, None) on success or (None, message) on failure. An absent
     value means the default. An unknown value is an error rather than a silent
-    default: the runtime is immutable once set, so guessing is not acceptable.
+    default: the runtime changes later only via the minqlxtended upgrade (there
+    is no downgrade), so guessing is not acceptable.
     """
     if value is None:
         return DEFAULT_RUNTIME, None
@@ -142,8 +144,9 @@ VALID_TIMEZONES = {
     'America/Santiago', 'America/Toronto', 'Asia/Colombo', 'Asia/Dubai', 'Asia/Jakarta',
     'Asia/Jerusalem', 'Asia/Kolkata', 'Asia/Riyadh', 'Asia/Seoul', 'Asia/Shanghai',
     'Asia/Singapore', 'Asia/Tokyo', 'Australia/Melbourne', 'Australia/Perth',
-    'Australia/Sydney', 'Europe/Amsterdam', 'Europe/Berlin', 'Europe/London',
-    'Europe/Madrid', 'Europe/Moscow', 'Europe/Paris', 'Europe/Stockholm', 'Europe/Warsaw',
+    'Australia/Sydney', 'Europe/Amsterdam', 'Europe/Berlin', 'Europe/Helsinki', 'Europe/London',
+    'Europe/Madrid', 'Europe/Moscow', 'Europe/Paris', 'Europe/Stockholm', 'Europe/Tallinn',
+    'Europe/Warsaw',
     'Pacific/Auckland', 'Pacific/Honolulu', 'UTC',
 }
 
@@ -155,7 +158,7 @@ from ui.tasks import provision_host, destroy_host, \
     setup_standalone_host_ansible, remove_standalone_host, \
     force_update_workshop_task, apply_plugin_updates_task, configure_host_auto_restart_task, \
     configure_host_watchdog_task, \
-    resize_host_task, \
+    resize_host_task, backfill_host_os_version, \
     rerun_host_setup_ansible, rerun_standalone_host_setup, \
     RERUN_CLOUD_SETUP_TIMEOUT, RERUN_SETUP_LOCK_RELEASE_BUFFER, \
     RERUN_STANDALONE_SETUP_TIMEOUT, \
@@ -183,8 +186,31 @@ host_api_bp = Blueprint('host_api_routes', __name__) # url_prefix will be set wh
 def list_hosts_api():
     """Returns a list of configured host servers."""
     hosts = get_hosts()
-    host_list = [host.to_dict() for host in hosts] # Assuming Host model has a to_dict() method
+    _enqueue_os_version_backfill(hosts)
+    # get_hosts() just loaded every row and its instances fresh; a per-host
+    # refresh would re-query each one (N+1 on a polled endpoint).
+    host_list = [host.to_dict(refresh=False) for host in hosts]
     return jsonify({"data": host_list})
+
+
+def _enqueue_os_version_backfill(hosts):
+    """Read the OS version of ACTIVE hosts that don't have one recorded yet.
+
+    At most one probe per host per hour, so an unreachable host is not retried
+    on every list refresh. The version shows up on a later refresh.
+    """
+    pending = [h for h in hosts if h.status == HostStatus.ACTIVE and not h.os_version]
+    if not pending:
+        return
+    redis_client = current_app.extensions.get('redis')
+    if redis_client is None:
+        return
+    try:
+        for host in pending:
+            if redis_client.set(f"host:os_version_probe:{host.id}", 1, nx=True, ex=3600):
+                enqueue_task(backfill_host_os_version, host.id)
+    except Exception:
+        current_app.logger.exception("Could not enqueue OS version backfill")
 
 @host_api_bp.route('/', methods=['POST'], endpoint='add_host_api')
 @jwt_required()
@@ -252,6 +278,7 @@ def _handle_cloud_host_creation(name, provider, data, runtime=DEFAULT_RUNTIME):
             # Ubuntu 24.04, which is also the only Terraform image that ships
             # the Python 3.12 it links against.
             os_type=runtime_paths(runtime)['os_type'],
+            os_version=runtime_paths(runtime)['os_version'],
             is_standalone=False,
             runtime=runtime,
             status=HostStatus.PENDING
@@ -395,8 +422,8 @@ def _validate_runtime_python(detected_os, runtime):
     """Whether a detected host meets the runtime's Python floor.
 
     Only minqlxtended has one (it links -lpython3.12). Returns (ok, message).
-    An undetectable version fails closed: the runtime choice is irreversible,
-    so shipping a host we cannot verify is worse than refusing.
+    An undetectable version fails closed: a minqlxtended host cannot be moved
+    back to minqlx, so shipping a host we cannot verify is worse than refusing.
     """
     minimum = runtime_paths(runtime)['min_python']
     if minimum is None:
@@ -613,6 +640,7 @@ def _handle_standalone_host_creation(name, data, runtime=DEFAULT_RUNTIME):
             ssh_key_path=ssh_key_path,
             ssh_port=ssh_port,
             os_type=detected_os['os_type'],
+            os_version=detected_os.get('version_id'),
             timezone=timezone,
             is_standalone=True,
             runtime=runtime,
@@ -776,6 +804,7 @@ def _handle_self_host_creation(name, data, runtime=DEFAULT_RUNTIME):
     lock_token = None
     local_os_info = detect_local_os()
     local_os_type = local_os_info.get('os_type') if local_os_info else None
+    local_os_version = local_os_info.get('version_id') if local_os_info else None
     try:
         key_path, public_key = generate_self_host_keys(name)
         host = create_host(
@@ -786,6 +815,7 @@ def _handle_self_host_creation(name, data, runtime=DEFAULT_RUNTIME):
             ssh_key_path=key_path,
             ssh_port=22,
             os_type=local_os_type,
+            os_version=local_os_version,
             is_standalone=True,
             timezone=timezone,
             runtime=runtime,
@@ -853,6 +883,9 @@ def delete_host_api(host_id): # Renamed function
     host = get_host(host_id)
     if not host:
         return jsonify({"error": {"message": "Host not found."}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     # Check if host has active instances (as per PRD)
     if host.instances and any(instance.status != InstanceStatus.DELETING for instance in host.instances):
@@ -905,6 +938,9 @@ def update_host_api(host_id):
     if not host:
         current_app.logger.warning(f"Update host: Host ID {host_id} not found.")
         return jsonify({"error": {"message": "Host not found"}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     data = request.get_json()
     if not data:
@@ -919,6 +955,15 @@ def update_host_api(host_id):
         if error:
             return jsonify({"error": {"message": error["message"]}}), error["status_code"]
         name = validated_name
+
+        # Standalone hosts belong to someone else's machine: by default only the
+        # name inside QLSM changes. The client opts in to renaming the machine too.
+        # Cloud hosts are provisioned by QLSM, so their hostname always follows.
+        apply_to_machine = data.get('apply_to_machine', False)
+        if not isinstance(apply_to_machine, bool):
+            return jsonify({"error": {"message": "apply_to_machine must be true or false."}}), 400
+        if not host.is_standalone:
+            apply_to_machine = True
 
         try:
             # Check if name is actually changing
@@ -940,7 +985,7 @@ def update_host_api(host_id):
                     update_host(host_id, name=old_name)
                     return jsonify({"error": {"message": f'Another operation is running on host "{old_name}". Please wait for it to complete.'}}), 409
                 try:
-                    enqueue_task(rename_host_task, host_id, old_name, name, lock_token=lock_token, on_failure=host_job_failure_handler)
+                    enqueue_task(rename_host_task, host_id, old_name, name, lock_token=lock_token, apply_to_machine=apply_to_machine, on_failure=host_job_failure_handler)
                 except Exception:
                     release_lock('host', host_id, lock_token)
                     update_host(host_id, name=old_name)
@@ -1006,6 +1051,9 @@ def install_qlfilter_api(host_id):
     host = get_host(host_id)
     if not host:
         return jsonify({"error": {"message": "Host not found."}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     if host.status not in [HostStatus.ACTIVE]: # Only allow on active hosts
         return jsonify({"error": {"message": f"Host is not in a valid state for QLFilter installation (current: {host.status.value})."}}), 409
@@ -1036,6 +1084,9 @@ def uninstall_qlfilter_api(host_id):
     host = get_host(host_id)
     if not host:
         return jsonify({"error": {"message": "Host not found."}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
     
     try:
         from ui.models import QLFilterStatus # Ensure QLFilterStatus is imported
@@ -1079,6 +1130,9 @@ def refresh_qlfilter_status_api(host_id):
     host = get_host(host_id)
     if not host:
         return jsonify({"error": {"message": "Host not found."}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     try:
         lock_token = str(uuid.uuid4())
@@ -1105,6 +1159,9 @@ def restart_host_api(host_id):
     if not host:
         current_app.logger.warning(f"Restart host API: Host ID {host_id} not found.")
         return jsonify({"error": {"message": "Host not found"}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     # Basic validation: only allow restart if host is ACTIVE
     if host.status != HostStatus.ACTIVE:
@@ -1137,6 +1194,9 @@ def resize_host_api(host_id):
     host = get_host(host_id)
     if not host:
         return jsonify({"error": {"message": "Host not found."}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     if host.provider != 'vultr':
         return jsonify({"error": {"message": "Resize is only supported for Vultr hosts."}}), 409
@@ -1200,6 +1260,9 @@ def rerun_setup_api(host_id):
     host = get_host(host_id)
     if not host:
         return jsonify({"error": {"message": "Host not found."}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     if host.status not in (HostStatus.ACTIVE, HostStatus.ERROR):
         return jsonify({"error": {"message": f"Host must be ACTIVE or ERROR to re-run setup. Current status: {host.status.value}"}}), 409
@@ -1272,6 +1335,9 @@ def force_update_workshop_api(host_id):
     if not host:
         current_app.logger.warning(f"Update workshop API: Host ID {host_id} not found.")
         return jsonify({"error": {"message": "Host not found"}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     # Basic validation: only allow if host is ACTIVE
     if host.status != HostStatus.ACTIVE:
@@ -1339,6 +1405,9 @@ def apply_plugin_updates_api(host_id):
     if not host:
         current_app.logger.warning(f"Apply plugin updates API: Host ID {host_id} not found.")
         return jsonify({"error": {"message": "Host not found"}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     if host.status != HostStatus.ACTIVE:
         current_app.logger.warning(f"Apply plugin updates API: Host ID {host_id} is not in ACTIVE state (current: {host.status.value}).")
@@ -1395,6 +1464,9 @@ def configure_auto_restart_api(host_id):
     if not host:
         current_app.logger.warning(f"Configure auto-restart API: Host ID {host_id} not found.")
         return jsonify({"error": {"message": "Host not found"}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     # Only allow on active hosts
     if host.status != HostStatus.ACTIVE:
@@ -1445,6 +1517,9 @@ def configure_watchdog_api(host_id):
     if not host:
         current_app.logger.warning(f"Configure watchdog API: Host ID {host_id} not found.")
         return jsonify({"error": {"message": "Host not found"}}), 404
+    blocked = upgrade_block_response(host.id, host.name)
+    if blocked:
+        return blocked
 
     if host.status != HostStatus.ACTIVE:
         current_app.logger.warning(f"Configure watchdog API: Host ID {host_id} is not in ACTIVE state (current: {host.status.value}).")

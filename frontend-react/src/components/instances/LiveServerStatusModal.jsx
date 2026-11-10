@@ -3,6 +3,11 @@ import { Transition } from '@headlessui/react';
 import { X, Users } from 'lucide-react';
 import QlColorString from '../common/QlColorString';
 import { useWorkshopPreview } from '../../hooks/useWorkshopPreview';
+import { useAddonPlayerColumns, playerSteamId } from '../../hooks/useAddonPlayerColumns';
+import { addonAssetUrl } from '../../services/addons';
+import { resolveAddonIcon } from '../addons/addonIcons';
+import { addonCellColorClass } from '../addons/addonCellColors';
+import AddonErrorBoundary from '../addons/AddonErrorBoundary';
 import standardMapPreviews from '../../constants/standardMapPreviews';
 
 // Team mapping — minqlx sends string values ('red', 'blue', 'free', 'spectator')
@@ -64,6 +69,77 @@ const teamName = (team) => {
 };
 
 const teamColor = (team) => TEAM_COLORS[normalizeTeam(team)] || 'text-theme-muted';
+
+// --- addon-contributed columns (see addons/README.md live_status_columns) ---
+//
+// The values come from a third-party addon's own endpoint, and this is the one
+// place where addon-driven content renders inside a component core owns rather
+// than in an addon slot. The hook normalizes the payload so nothing malformed
+// reaches JSX; AddonErrorBoundary below is the second line, for anything the
+// normalizer doesn't anticipate -- with a tiny inline fallback, because the
+// boundary's default box cannot live in a table cell.
+
+// The drawer is sized for core's own five columns. Each addon column needs
+// room for a short value on one line ("Platinum IV" plus its icon), so the
+// drawer grows with the number shown instead of pushing the column past the
+// right edge. Literal class names, because Tailwind only emits what it can
+// see in the source; the table still scrolls sideways on a narrow screen.
+const DRAWER_WIDTH_BY_ADDON_COLUMNS = ['w-[500px]', 'w-[630px]', 'w-[750px]', 'w-[870px]'];
+
+const AddonColumnIcon = ({ addonId, icon, iconUrl }) => {
+    // null when the path tries to leave the addon's ui/ directory. A cell's
+    // icon_url comes from the addon's response, not its manifest, so this is
+    // the only place that check happens for it.
+    const src = iconUrl ? addonAssetUrl(addonId, iconUrl) : null;
+    if (src) {
+        return <img src={src} alt="" className="h-3 w-3 flex-shrink-0" />;
+    }
+    if (icon) {
+        return React.createElement(resolveAddonIcon(icon), { size: 12, className: 'flex-shrink-0' });
+    }
+    return null;
+};
+
+const AddonColumnHeader = ({ col }) => (
+    <th className={`px-3 py-2 font-medium ${col.align === 'right' ? 'text-right' : 'text-left'}`}>
+        <AddonErrorBoundary addonId={col.addonId} fallback={<span>?</span>}>
+            <span className={`inline-flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
+                <AddonColumnIcon addonId={col.addonId} icon={col.icon} iconUrl={col.iconUrl} />
+                {col.label}
+            </span>
+        </AddonErrorBoundary>
+    </th>
+);
+
+const AddonColumnCell = ({ col, steamId }) => {
+    const cell = col.data[steamId];
+    const entries = cell?.entries || null;
+    return (
+        <td
+            className={`px-3 py-2 font-mono text-theme-secondary align-top whitespace-nowrap ${col.align === 'right' ? 'text-right' : 'text-left'}`}
+            title={entries ? undefined : (cell?.title || undefined)}
+        >
+            <AddonErrorBoundary addonId={col.addonId} fallback={<span className="text-theme-muted">—</span>}>
+                {entries ? (
+                    <div className={`flex flex-col gap-0.5 ${col.align === 'right' ? 'items-end' : 'items-start'}`}>
+                        {entries.map((entry, idx) => (
+                            <span
+                                key={idx}
+                                className={`inline-flex items-center gap-1 ${addonCellColorClass(entry.color)}`}
+                                title={entry.title || undefined}
+                            >
+                                <AddonColumnIcon addonId={col.addonId} icon={entry.icon} iconUrl={entry.iconUrl} />
+                                {entry.display}
+                            </span>
+                        ))}
+                    </div>
+                ) : (
+                    <span className={addonCellColorClass(cell?.color)}>{cell?.display || '—'}</span>
+                )}
+            </AddonErrorBoundary>
+        </td>
+    );
+};
 
 export default function LiveServerStatusModal({ isOpen, onClose, instance, serverStatus }) {
     const panelRef = useRef(null);
@@ -145,6 +221,8 @@ export default function LiveServerStatusModal({ isOpen, onClose, instance, serve
         isOpen
     );
 
+    const playerColumns = useAddonPlayerColumns(isOpen, instance?.id, serverStatus?.players);
+
     const computedMapPreview = (() => {
         const mapName = String(serverStatus?.map || '').trim().toLowerCase();
         const workshopItemId = serverStatus?.workshop_item_id;
@@ -223,7 +301,7 @@ export default function LiveServerStatusModal({ isOpen, onClose, instance, serve
                         leaveFrom="translate-x-0"
                         leaveTo="translate-x-full"
                     >
-                        <div ref={panelRef} className="drawer-panel w-[500px] pointer-events-auto flex flex-col">
+                        <div ref={panelRef} className={`drawer-panel ${DRAWER_WIDTH_BY_ADDON_COLUMNS[playerColumns.length] || DRAWER_WIDTH_BY_ADDON_COLUMNS[0]} max-w-full pointer-events-auto flex flex-col`}>
                             {/* Header */}
                             <div className="drawer-header shrink-0 mt-0" style={{ borderBottom: 'none' }}>
                                 <div>
@@ -292,7 +370,7 @@ export default function LiveServerStatusModal({ isOpen, onClose, instance, serve
                                             </div>
 
                                             {sortedPlayers.length > 0 ? (
-                                                <div className="border border-theme-strong rounded overflow-hidden">
+                                                <div className="border border-theme-strong rounded overflow-x-auto">
                                                     <table className="w-full text-left text-[13px]">
                                                         <thead className="bg-theme-elevated text-[11px] font-mono text-theme-muted uppercase tracking-wider">
                                                             <tr>
@@ -301,16 +379,21 @@ export default function LiveServerStatusModal({ isOpen, onClose, instance, serve
                                                                 <th className="px-3 py-2 font-medium">Team</th>
                                                                 <th className="px-3 py-2 font-medium text-right">Score</th>
                                                                 <th className="px-3 py-2 font-medium text-right">Ping</th>
+                                                                {playerColumns.map((col) => (
+                                                                    <AddonColumnHeader key={col.key} col={col} />
+                                                                ))}
                                                             </tr>
                                                         </thead>
                                                         <tbody className="divide-y divide-theme border-t border-theme-strong">
-                                                            {sortedPlayers.map((p, i) => (
+                                                            {sortedPlayers.map((p, i) => {
+                                                                const steamId = playerSteamId(p) || '';
+                                                                return (
                                                                 <tr key={i} className="hover:bg-theme-elevated/50 transition-colors">
                                                                     <td className="px-3 py-2 font-medium truncate max-w-[150px]" title={p.name}>
                                                                         <QlColorString text={p.name || 'Unknown'} className="text-theme-primary" />
                                                                     </td>
                                                                     <td className="px-3 py-2 font-mono text-[11px] text-theme-muted">
-                                                                        {p.steam || p.steamid || p.steam_id || '—'}
+                                                                        {steamId || '—'}
                                                                     </td>
                                                                     <td className={`px-3 py-2 font-mono text-[11px] ${teamColor(p.team)}`}>
                                                                         {teamName(p.team)}
@@ -321,8 +404,12 @@ export default function LiveServerStatusModal({ isOpen, onClose, instance, serve
                                                                     <td className="px-3 py-2 font-mono text-theme-secondary text-right">
                                                                         {p.ping ?? '?'}
                                                                     </td>
+                                                                    {playerColumns.map((col) => (
+                                                                        <AddonColumnCell key={col.key} col={col} steamId={steamId} />
+                                                                    ))}
                                                                 </tr>
-                                                            ))}
+                                                                );
+                                                            })}
                                                         </tbody>
                                                     </table>
                                                 </div>

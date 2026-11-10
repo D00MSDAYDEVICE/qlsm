@@ -1,19 +1,26 @@
 import signal
 import sys
 import threading
+import time
 import logging
 import click
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 15  # seconds
+RUNTIME_UPGRADE_RECONCILE_INTERVAL = 60  # seconds; the first pass is the startup sweep
+# A slow poller.tick handler is logged by addon id in ui.addons.registry.dispatch.
 
 
 def register_cli_commands(app):
     @app.cli.command('run-status-poller')
     def run_status_poller():
         """Daemon: polls game server status from game host Redis via SSH every 15s."""
+        from ui import db
+        from ui.addons import dispatch
+        from ui.task_logic.interrupted_job_recovery import reconcile_stale_instance_jobs
         from ui.task_logic.server_status_poll import poll_all_hosts
+        from ui.task_logic.host_runtime_upgrade_recovery import reconcile_runtime_upgrades
 
         stop_event = threading.Event()
 
@@ -25,11 +32,35 @@ def register_cli_commands(app):
         signal.signal(signal.SIGINT, _handle_signal)
 
         logger.info("Status poller started (interval=%ds)", POLL_INTERVAL)
+        last_upgrade_reconcile = None
         while not stop_event.is_set():
+            if (last_upgrade_reconcile is None
+                    or time.monotonic() - last_upgrade_reconcile >= RUNTIME_UPGRADE_RECONCILE_INTERVAL):
+                last_upgrade_reconcile = time.monotonic()
+                try:
+                    reconcile_runtime_upgrades()
+                except Exception as e:
+                    logger.error(f"Runtime upgrade reconcile failed: {e}", exc_info=True)
+                    db.session.rollback()
             try:
                 poll_all_hosts()
             except Exception as e:
                 logger.error(f"Poll cycle failed: {e}", exc_info=True)
+            try:
+                reconcile_stale_instance_jobs()
+            except Exception as e:
+                logger.error(f"Stale instance job reconcile failed: {e}", exc_info=True)
+            try:
+                dispatch('poller.tick')
+            except Exception as e:
+                logger.error(f"poller.tick dispatch failed: {e}", exc_info=True)
+            # dispatch() swallows handler errors, so a handler that left this
+            # process's one session needing a rollback would otherwise break
+            # every later poll cycle. Handlers commit their own work.
+            try:
+                db.session.rollback()
+            except Exception as e:
+                logger.error(f"Session rollback after poller.tick failed: {e}", exc_info=True)
             stop_event.wait(POLL_INTERVAL)
         logger.info("Status poller stopped")
 

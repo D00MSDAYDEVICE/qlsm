@@ -7,6 +7,7 @@ database status to ERROR to prevent instances from being stuck
 in transitional states.
 """
 import logging
+from rq.exceptions import AbandonedJobError
 from rq.job import Job
 
 log = logging.getLogger(__name__)
@@ -47,7 +48,23 @@ def instance_job_failure_handler(job: Job, connection, type, value, traceback):
             if not instance:
                 log.error(f"Job failure handler: Instance {instance_id} not found")
                 return
-            
+
+            lock_token = job.meta.get('lock_token') if job.meta else None
+
+            # The worker died mid-job: the service may be fine, so report what
+            # is actually running instead of blindly setting ERROR.
+            if issubclass(type, AbandonedJobError):
+                from ui.task_logic.interrupted_job_recovery import recover_interrupted_instance
+                recover_interrupted_instance(
+                    instance_id, job.id, lock_token, f"{type.__name__}: {value}"
+                )
+                return
+
+            from ui.task_lock import lock_superseded
+            if lock_superseded('instance', instance_id, lock_token):
+                log.info(f"Instance {instance_id} lock held by a newer operation, skipping failure handling for job {job.id}")
+                return
+
             # Only update if still in a transitional state
             transitional_states = [
                 InstanceStatus.DEPLOYING,
@@ -68,7 +85,6 @@ def instance_job_failure_handler(job: Job, connection, type, value, traceback):
                 log.info(f"Instance {instance_id} already in terminal state {instance.status.value}, skipping update")
 
             # Release entity lock if token is available (safety net)
-            lock_token = job.meta.get('lock_token') if job.meta else None
             if lock_token:
                 from ui.task_lock import release_lock
                 release_lock('instance', instance_id, lock_token)
@@ -148,3 +164,20 @@ def host_job_failure_handler(job: Job, connection, type, value, traceback):
 
     except Exception as e:
         log.exception(f"Error in job failure handler for host {host_id}: {e}")
+
+
+def runtime_upgrade_job_failure_handler(job: Job, connection, type, value, traceback):
+    """Called by RQ when a host runtime upgrade (or its recovery) job fails,
+    times out or is abandoned by a dead worker. Durably requests recovery and
+    enqueues recover_host_runtime; if that enqueue fails, the periodic
+    reconciler finds the operation and retries. Never raises."""
+    from ui import create_app
+    from ui.task_logic.host_runtime_upgrade_recovery import handle_upgrade_job_failure
+
+    log.warning(f"Runtime upgrade job {job.id} failed: {getattr(type, '__name__', type)}: {value}")
+    try:
+        app = create_app()
+        with app.app_context():
+            handle_upgrade_job_failure(job, type, value)
+    except Exception as e:
+        log.error(f"Runtime upgrade failure handler error for job {job.id}: {e}", exc_info=True)

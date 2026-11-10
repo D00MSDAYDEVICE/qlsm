@@ -11,14 +11,16 @@ import PresetManagerModal from '../presetManager/PresetManagerModal';
 import InfoTooltip from '../common/InfoTooltip';
 import FullScreenConfigEditorModal from '../config/FullScreenConfigEditorModal';
 import SubfolderPluginNotice from '../fileManager/SubfolderPluginNotice';
+import { useNotification } from '../NotificationProvider';
+import { useHostPoolStatus } from '../../hooks/useHostPoolStatus';
 import {
   CONFIG_CAPS,
   FACTORY_CAPS,
   FileManager,
-  getPluginDisplayLabel,
   PLUGIN_CAPS,
   PluginCvarsModal,
   useDraftAdapter,
+  useUploadBusy,
   useStateAdapter,
 } from '../fileManager';
 import {
@@ -53,6 +55,13 @@ import OwnerAdminEditor from '../operators/OwnerAdminEditor';
 const CONFIG_FILES = ['server.cfg', 'mappool.txt', 'access.txt', 'workshop.txt'];
 const NET_PORT_REGEX = /^(set\s+net_port\s+").*(".*)/m;
 const HOSTNAME_REGEX = /^(set\s+sv_hostname\s+").*(".*)/m;
+
+function withServerHostname(serverCfg, hostname) {
+  if (!serverCfg) return `set sv_hostname "${hostname}"`;
+  return HOSTNAME_REGEX.test(serverCfg)
+    ? serverCfg.replace(HOSTNAME_REGEX, (_m, head, tail) => `${head}${hostname}${tail}`)
+    : `${serverCfg}\nset sv_hostname "${hostname}"`;
+}
 
 const CONFIG_LANGUAGE_MAP = {
   'server.cfg': qlcfgLanguage,
@@ -212,6 +221,7 @@ function AddInstanceForm({
   const [pluginNoticeDismissed, setPluginNoticeDismissed] = useState(false);
   const [cvarsModalTarget, setCvarsModalTarget] = useState(null); // { label, cvars } | null
   const pluginsManagerRef = useRef(null);
+  const { uploading, track: trackUploads } = useUploadBusy();
   const [draftPreset, setDraftPreset] = useState(defaultPresetNameForRuntime(initialHostRuntime));
   // Bare filenames the operator accepted a runtime replacement for, from the
   // preset compatibility dialog. Sent to the draft seed so the server writes
@@ -251,6 +261,9 @@ function AddInstanceForm({
   const initialSelectedHostIdRef = useRef('');
   const initialPortRef = useRef('');
   const initialHostnameRef = useRef('');
+  // Set when the operator edits the hostname (field or sv_hostname line), so a
+  // preset load keeps it even when it equals the value the form filled in.
+  const hostnameTypedRef = useRef(false);
   const initialLanRateEnabledRef = useRef(false);
   const initialConfigContentsRef = useRef(normalizeConfigMap(initialData.defaultConfigContents || createEmptyConfigMap()));
   const initialCheckedPluginsRef = useRef(initialPluginSeed.selectable);
@@ -312,6 +325,11 @@ function AddInstanceForm({
   const selectedHost = (initialData.hosts || []).find((host) => String(host.id) === String(effectiveHostId));
   const selectedHostOsType = selectedHost?.os_type ?? null;
   const hasSelectedHost = Boolean(selectedHost);
+  const { showError } = useNotification();
+  const hostPool = useHostPoolStatus(
+    effectiveHostId ? Number(effectiveHostId) : null,
+    { enabled: activeMainTab === 'scripts' && hasSelectedHost, showError },
+  );
   const selectedHostShape = {
     os_type: selectedHostOsType,
     lan_rate_uses_hook: selectedHost?.lan_rate_uses_hook ?? false,
@@ -424,7 +442,7 @@ function AddInstanceForm({
   }, []);
 
   const handleEditPluginCvars = useCallback((item, cvars) => {
-    setCvarsModalTarget({ label: getPluginDisplayLabel(item), cvars });
+    setCvarsModalTarget({ label: item.name, cvars });
   }, []);
 
   const handleSavePluginCvars = useCallback((nextConfig) => {
@@ -564,6 +582,7 @@ function AddInstanceForm({
     // Default to empty; overwritten by handleHostChange with the auto-selected port when startHostId is set
     initialPortRef.current = '';
     initialHostnameRef.current = initialHostnameFromCfg;
+    hostnameTypedRef.current = false;
     initialLanRateEnabledRef.current = false;
 
     setName('');
@@ -709,9 +728,7 @@ function AddInstanceForm({
   useEffect(() => {
     if (hostname !== '' && hostname !== prevHostnameRef.current && !isUpdatingFromServerCfg.current) {
       const currentServerCfg = configContentsRef.current['server.cfg'] || '';
-      const nextServerCfg = currentServerCfg
-        ? (HOSTNAME_REGEX.test(currentServerCfg) ? currentServerCfg.replace(HOSTNAME_REGEX, `$1${hostname}$2`) : `${currentServerCfg}\nset sv_hostname "${hostname}"`)
-        : `set sv_hostname "${hostname}"`;
+      const nextServerCfg = withServerHostname(currentServerCfg, hostname);
       if (nextServerCfg !== currentServerCfg) {
         syncConfigFile('server.cfg', nextServerCfg);
       }
@@ -756,10 +773,16 @@ function AddInstanceForm({
       // Extract hostname and port from preset server.cfg, patching newConfigs before setting state
       let newInitialHostname = hostnameRef.current;
       let newInitialPort = portRef.current;
+      // A hostname the operator typed wins over the preset's; an untouched one follows the preset.
+      const keepTypedHostname = hostnameTypedRef.current && hostnameRef.current !== '';
+
+      if (keepTypedHostname) {
+        newConfigs['server.cfg'] = withServerHostname(newConfigs['server.cfg'], hostnameRef.current);
+      }
 
       if (newConfigs['server.cfg']) {
         const hostnameMatch = newConfigs['server.cfg'].match(/^set\s+sv_hostname\s+"([^"]*)"/m);
-        if (hostnameMatch && hostnameMatch[1]) {
+        if (!keepTypedHostname && hostnameMatch && hostnameMatch[1]) {
           newInitialHostname = hostnameMatch[1];
           isUpdatingFromServerCfg.current = true;
           setHostname(newInitialHostname);
@@ -1099,7 +1122,7 @@ function AddInstanceForm({
     syncConfigFile(fileName, newContent);
     if (fileName === 'server.cfg') {
       const hostnameMatch = newContent.match(/^set\s+sv_hostname\s+"([^"]*)"/m);
-      if (hostnameMatch && hostnameMatch[1] !== hostnameRef.current) { isUpdatingFromServerCfg.current = true; setHostname(hostnameMatch[1]); setTimeout(() => isUpdatingFromServerCfg.current = false, 0); }
+      if (hostnameMatch && hostnameMatch[1] !== hostnameRef.current) { hostnameTypedRef.current = true; isUpdatingFromServerCfg.current = true; setHostname(hostnameMatch[1]); setTimeout(() => isUpdatingFromServerCfg.current = false, 0); }
       const portMatch = newContent.match(/^set\s+net_port\s+"(\d+)"/m);
       if (portMatch && portMatch[1] !== portRef.current) { const portVal = portMatch[1]; if (availablePortsRef.current.includes(parseInt(portVal, 10))) { isUpdatingPortFromServerCfg.current = true; setPort(portVal); setTimeout(() => isUpdatingPortFromServerCfg.current = false, 0); } }
     }
@@ -1189,6 +1212,7 @@ function AddInstanceForm({
 
   const localHandleSubmit = async (e) => {
     e.preventDefault();
+    if (uploading) return;
     if (serverCfgHasLintErrors) { setInternalFormError("Please fix errors in server.cfg before submitting."); return; }
     setInternalFormError(null);
 
@@ -1278,7 +1302,7 @@ function AddInstanceForm({
   return (
     <form onSubmit={localHandleSubmit} className="flex flex-col flex-grow min-h-0 pt-4">
       <div className="flex-shrink-0 mb-6">
-        <InstanceBasicInfoForm name={name} onNameChange={(e) => setName(e.target.value)} selectedHostId={selectedHostId} onHostChange={handleHostChange} hosts={initialData.hosts || []} port={port} onPortChange={setPort} availablePorts={availablePorts} loadingPorts={loadingPorts} redisDb={redisDb} onRedisDbChange={setRedisDb} redisDbOptions={redisDbOptions} hostname={hostname} onHostnameChange={(e) => setHostname(e.target.value)} />
+        <InstanceBasicInfoForm name={name} onNameChange={(e) => setName(e.target.value)} selectedHostId={selectedHostId} onHostChange={handleHostChange} hosts={initialData.hosts || []} port={port} onPortChange={setPort} availablePorts={availablePorts} loadingPorts={loadingPorts} redisDb={redisDb} onRedisDbChange={setRedisDb} redisDbOptions={redisDbOptions} hostname={hostname} onHostnameChange={(e) => { hostnameTypedRef.current = true; setHostname(e.target.value); }} />
         <InstanceOptionsRow
           lanRateEnabled={lanRateEnabled}
           onLanRateChange={setLanRateEnabled}
@@ -1355,6 +1379,7 @@ function AddInstanceForm({
             <div className={activeMainTab === 'config' ? 'flex-1 min-h-0' : 'hidden'}>
               <FileManager
                 adapter={configsAdapter}
+                onUploadingChange={trackUploads('config')}
                 capabilities={CONFIG_CAPS}
                 defaultSelectedPath="server.cfg"
                 onExpandEditor={handleExpandEditor}
@@ -1371,6 +1396,7 @@ function AddInstanceForm({
                 <FileManager
                   ref={pluginsManagerRef}
                   adapter={pluginsAdapter}
+                  onUploadingChange={trackUploads('plugins')}
                   capabilities={PLUGIN_CAPS}
                   checkable
                   checkedFiles={checkedPlugins}
@@ -1384,12 +1410,17 @@ function AddInstanceForm({
                     contextKey: draftPreset || 'default',
                   }}
                   onEditCvars={handleEditPluginCvars}
+                  missingOnHost={hostPool.missing}
+                  onPushToHost={hostPool.push}
+                  pushingToHost={hostPool.pushing}
+                  hostPoolUnavailable={hostPool.state === 'unavailable'}
                 />
               </div>
             </div>
             <div className={activeMainTab === 'factories' ? 'flex-1 min-h-0' : 'hidden'}>
               <FileManager
                 adapter={factoriesAdapter}
+                onUploadingChange={trackUploads('factories')}
                 capabilities={FACTORY_CAPS}
                 checkable
                 checkedFiles={checkedFactories}
@@ -1417,7 +1448,7 @@ function AddInstanceForm({
               </div>
             )}
             {/* Kept mounted: OwnerAdminEditor fills the operators cache the access.txt autocomplete reads. */}
-            <div className={activeMainTab === 'admins' ? 'flex-1 min-h-0 overflow-y-auto' : 'hidden'}>
+            <div className={activeMainTab === 'admins' ? 'flex-1 min-h-0 overflow-y-auto scrollbar-thick pr-3 mr-0.5' : 'hidden'}>
               <OwnerAdminEditor
                 serverCfgContent={configContents['server.cfg'] || ''}
                 onServerCfgChange={handleOwnerChange}
@@ -1480,7 +1511,7 @@ function AddInstanceForm({
           </button>
           <button
             type="submit"
-            disabled={isLoadingSubmit || serverCfgHasLintErrors}
+            disabled={isLoadingSubmit || serverCfgHasLintErrors || uploading}
             className="btn btn-primary"
           >
             {isLoadingSubmit ? (

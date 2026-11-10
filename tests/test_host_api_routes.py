@@ -1107,6 +1107,74 @@ def test_update_host_name_success(mock_lock, mock_enqueue, client, app):
 
 
 @patch('ui.routes.host_routes.enqueue_task')
+@patch('ui.routes.host_routes.acquire_lock', return_value=True)
+def test_update_standalone_host_name_defaults_to_qlsm_only(mock_lock, mock_enqueue, client, app):
+    """A standalone rename without apply_to_machine leaves the machine alone."""
+    with app.app_context():
+        host = create_host(name='sa-old', provider='standalone', is_standalone=True,
+                           status=HostStatus.ACTIVE)
+        host_id = host.id
+
+    headers = auth_headers(app, DEFAULT_USER)
+    response = client.put(f'/api/hosts/{host_id}', headers=headers, json={'name': 'sa-new'})
+    assert response.status_code == 200
+    mock_enqueue.assert_called_once()
+    assert mock_enqueue.call_args.kwargs['apply_to_machine'] is False
+
+
+@patch('ui.routes.host_routes.enqueue_task')
+@patch('ui.routes.host_routes.acquire_lock', return_value=True)
+def test_update_standalone_host_name_apply_to_machine_opt_in(mock_lock, mock_enqueue, client, app):
+    """A standalone rename with apply_to_machine=true renames the machine too."""
+    with app.app_context():
+        host = create_host(name='sa-opt-old', provider='standalone', is_standalone=True,
+                           status=HostStatus.ACTIVE)
+        host_id = host.id
+
+    headers = auth_headers(app, DEFAULT_USER)
+    response = client.put(f'/api/hosts/{host_id}', headers=headers, json={
+        'name': 'sa-opt-new', 'apply_to_machine': True
+    })
+    assert response.status_code == 200
+    assert mock_enqueue.call_args.kwargs['apply_to_machine'] is True
+
+
+@patch('ui.routes.host_routes.enqueue_task')
+@patch('ui.routes.host_routes.acquire_lock', return_value=True)
+def test_update_cloud_host_name_always_applies_to_machine(mock_lock, mock_enqueue, client, app):
+    """A cloud host's hostname always follows the rename, whatever the client sends."""
+    with app.app_context():
+        host = create_host(name='cloud-old', provider='vultr', status=HostStatus.ACTIVE)
+        host_id = host.id
+
+    headers = auth_headers(app, DEFAULT_USER)
+    response = client.put(f'/api/hosts/{host_id}', headers=headers, json={
+        'name': 'cloud-new', 'apply_to_machine': False
+    })
+    assert response.status_code == 200
+    assert mock_enqueue.call_args.kwargs['apply_to_machine'] is True
+
+
+@patch('ui.routes.host_routes.enqueue_task')
+@patch('ui.routes.host_routes.acquire_lock', return_value=True)
+def test_update_host_name_apply_to_machine_non_bool_rejected(mock_lock, mock_enqueue, client, app):
+    """A non-boolean apply_to_machine returns 400 and leaves the name unchanged."""
+    with app.app_context():
+        host = create_host(name='sa-bad', provider='standalone', is_standalone=True,
+                           status=HostStatus.ACTIVE)
+        host_id = host.id
+
+    headers = auth_headers(app, DEFAULT_USER)
+    response = client.put(f'/api/hosts/{host_id}', headers=headers, json={
+        'name': 'sa-bad-new', 'apply_to_machine': 'yes'
+    })
+    assert response.status_code == 400
+    mock_enqueue.assert_not_called()
+    with app.app_context():
+        assert get_host(host_id).name == 'sa-bad'
+
+
+@patch('ui.routes.host_routes.enqueue_task')
 def test_update_host_same_name(mock_enqueue, client, app):
     """Updating to the same name succeeds without queuing rename task."""
     with app.app_context():
@@ -1690,3 +1758,67 @@ def test_configure_auto_restart_api_invalid_schedule(client, app):
     })
     assert response.status_code == 400
     assert 'Invalid schedule format' in response.get_json()['error']['message']
+
+
+
+def _count_selects(app, fn):
+    from sqlalchemy import event
+
+    statements = []
+    with app.app_context():
+        engine = db.engine
+
+    def before(conn, cursor, statement, *args):
+        if statement.lstrip().upper().startswith('SELECT'):
+            statements.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', before)
+    try:
+        result = fn()
+    finally:
+        event.remove(engine, 'before_cursor_execute', before)
+    return result, len(statements)
+
+
+def _add_hosts_with_instances(app, start, stop, per_host=2):
+    with app.app_context():
+        for h in range(start, stop):
+            host = Host(name=f'nplus-{h}', provider='vultr', status=HostStatus.ACTIVE,
+                        runtime='minqlx', os_type='ubuntu', os_version='24.04', ip_address=f'10.0.1.{h}')
+            db.session.add(host)
+            db.session.flush()
+            for i in range(per_host):
+                db.session.add(QLInstance(name=f'n{h}-{i}', port=27960 + i, hostname='hn', host_id=host.id,
+                                          status=InstanceStatus.RUNNING, zmq_rcon_port=28000 + i,
+                                          zmq_rcon_password='x', zmq_stats_port=29000 + i,
+                                          zmq_stats_password='y'))
+        db.session.commit()
+
+
+@patch('ui.routes.host_routes._enqueue_os_version_backfill')
+def test_list_hosts_query_count_does_not_grow_with_hosts(mock_backfill, client, app):
+    """The polled hosts list (each host's instances and runtime_upgrade
+    eligibility included) loads instances in one query, not one per host."""
+    headers = auth_headers(app, DEFAULT_USER)
+    _add_hosts_with_instances(app, 0, 2)
+    _resp, few = _count_selects(app, lambda: client.get('/api/hosts/', headers=headers))
+    _add_hosts_with_instances(app, 2, 8)
+    resp, many = _count_selects(app, lambda: client.get('/api/hosts/', headers=headers))
+    assert resp.status_code == 200
+    data = resp.get_json()['data']
+    assert len(data) == 8
+    assert all(len(h['instances']) == 2 and h['runtime_upgrade']['enabled'] for h in data)
+    assert many == few, (few, many)
+
+
+def test_list_hosts_output_matches_host_to_dict(client, app):
+    """The list route's dicts are exactly what Host.to_dict() returns."""
+    headers = auth_headers(app, DEFAULT_USER)
+    _add_hosts_with_instances(app, 0, 3)
+    with app.app_context():
+        create_host(name='bare', provider='vultr', status=HostStatus.PENDING)
+    with patch('ui.routes.host_routes._enqueue_os_version_backfill'):
+        data = client.get('/api/hosts/', headers=headers).get_json()['data']
+    with app.app_context():
+        expected = [host.to_dict() for host in Host.query.order_by(Host.name).all()]
+    assert data == expected

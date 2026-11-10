@@ -24,7 +24,7 @@ All endpoints except `/api/auth/login` require authentication via JWT cookie.
 | `/hosts/self/defaults` | GET | Get detected defaults for the self-host provider |
 | `/hosts/test-connection` | POST | Test standalone SSH connectivity before host creation |
 | `/hosts/<id>` | GET | Get host details with instances |
-| `/hosts/<id>` | PUT | Update host (e.g., rename - triggers rename task) |
+| `/hosts/<id>` | PUT | Update host (rename - triggers rename task; see [Update Host](#update-host-rename)) |
 | `/hosts/<id>` | DELETE | Delete host (triggers Terraform destroy) |
 | `/hosts/<id>/restart` | POST | Restart/reboot host |
 | `/hosts/<id>/resize` | POST | Resize a Vultr host to a larger same-family plan |
@@ -39,6 +39,8 @@ All endpoints except `/api/auth/login` require authentication via JWT cookie.
 | `/hosts/<id>/plugin-updates/apply` | POST | Apply selected plugin updates, optionally restarting instances |
 | `/hosts/<id>/auto-restart` | POST | Configure host auto-restart schedule |
 | `/hosts/<id>/watchdog` | POST | Enable/disable and tune the ql-watchdog add-on |
+| `/hosts/<id>/runtime-upgrade` | GET | Compatibility dry-run for upgrading the host from minqlx to minqlxtended |
+| `/hosts/<id>/runtime-upgrade` | POST | Confirm and queue the minqlx -> minqlxtended upgrade (see [Runtime Upgrade](#runtime-upgrade)) |
 
 ### Configure Watchdog
 
@@ -97,8 +99,9 @@ enabling it installs `gdb` on the host.
 GET /api/hosts/<id>/plugin-updates
 ```
 
-Read-only diff of `ql-assets/data/<pool>/` (the pool is chosen from
-`runtime_paths(host.runtime)['asset_plugins_dir']`) against two targets. Only
+Read-only diff of the host runtime's merged plugin pool (the built-in tier
+`ql-assets/data/<pool>/` overlaid by the operator tier
+`data/shared-plugins/<runtime>/`, see `ui/plugin_pool.py`) against two targets. Only
 `.py` and `.ql-plugin.json` files at the top level of the pool are compared.
 
 - **Common pool:** the host's `/home/ql/assets/common/<pool>/`, hashed with
@@ -185,6 +188,89 @@ host lock; `500` enqueue failure.
 If the common pool refresh fails, the task sets the host to `ERROR` and stops
 before copying any instance files.
 
+### Runtime Upgrade
+
+```
+GET  /api/hosts/<id>/runtime-upgrade
+POST /api/hosts/<id>/runtime-upgrade
+```
+
+Upgrades every instance on a minqlx host to minqlxtended in one operation, with
+a whole-host rollback if any step fails. The host must run minqlx, be `ACTIVE`,
+run Ubuntu 24.04 or newer, and have every instance `RUNNING` or `STOPPED`.
+
+**GET: dry-run (200)**
+
+```json
+{
+  "data": {
+    "eligibility": {"visible": true, "enabled": true, "reason": null},
+    "instances": [
+      {
+        "instance_id": 1,
+        "instance_name": "ca-1",
+        "stripped": [{"path": "ban.py", "kind": "replaceable", "replacement": "ban.py", "...": "..."}],
+        "replacements": {"ban.py": "<target file text>"},
+        "auto_accepted": ["balance.py"],
+        "checked_plugins": ["balance.py", "ban.py"]
+      }
+    ],
+    "fingerprint": "<sha256 hex>"
+  }
+}
+```
+
+Each `instances` entry is that instance's cross-runtime compatibility report,
+with the same `stripped` entry fields as a preset load (see
+[Per-entry fields](#per-entry-fields)). `fingerprint` identifies everything the
+upgrade depends on: instance fields, config and script files, plugin selection,
+hooks, and the target runtime's shipped files.
+
+Errors: `404` host not found; `409` with `eligibility.reason` as the message if
+the host is not eligible, or if an upgrade is already in progress.
+
+**POST: confirm (202)**
+
+```json
+{
+  "fingerprint": "<value from the GET>",
+  "accepted_replacements": {"1": ["ban.py"]}
+}
+```
+
+- `fingerprint`: the GET's value, echoed back unchanged.
+- `accepted_replacements`: object keyed by instance id, each a list of the
+  plugin paths whose minqlxtended replacement the operator ticked. A path is
+  accepted only if it was offered for that instance: a `stripped` entry with
+  `kind: "replaceable"`, or a path in `auto_accepted` (auto-accepted paths are
+  applied anyway). Missing instances and empty lists mean nothing ticked.
+
+```json
+{"data": {"status": "configuring"}, "message": "Runtime upgrade queued."}
+```
+
+The route takes the host and instance locks, re-checks eligibility, recaptures
+the inputs, and refuses if their fingerprint no longer matches. It then
+records the operation and sets the host to `CONFIGURING`. It releases the locks
+before queueing; the background job takes them again. From then on, every
+mutation of the host and its instances, and a backup import, returns `409`
+until the operation ends.
+
+Errors:
+
+- `400` malformed body: a non-string `fingerprint`, a non-object
+  `accepted_replacements`, a non-numeric instance id, a non-list value, a
+  non-string or duplicate path, an instance not on the host, or a path that was
+  not offered.
+- `404` host not found.
+- `409` host not eligible, an upgrade already in progress, the host or an
+  instance locked by another operation, a backup export or import running,
+  instances added or removed during the request, or a stale `fingerprint`
+  (anything changed since the GET: run the dry-run again).
+- `500` the job could not be confirmed as queued. If it did not start, the
+  operation is cancelled automatically within a few minutes and the host
+  returns to `ACTIVE`.
+
 ### Resize Host
 
 ```
@@ -231,6 +317,50 @@ Error responses:
 The resize task sets the host to `configuring`, runs `terraform apply` with
 `vultr_plan=<new_plan>`, then returns the host to `active` on success. Vultr may
 reboot the VM during the resize; QLDS services are expected to auto-restart.
+
+### Update Host (Rename)
+
+```
+PUT /api/hosts/<id>
+```
+
+Request:
+
+```json
+{
+  "name": "new-host-name",
+  "apply_to_machine": false
+}
+```
+
+- `name`: validated like a new host name (see [Host Name Validation](#host-name-validation-rfc-1123)) and must be unique.
+- `apply_to_machine` (optional, boolean): whether the rename also changes the
+  machine itself (`hostname`, `/etc/hostname`, the `127.0.1.1` line of
+  `/etc/hosts`, cloud-init). Defaults to `false` for standalone hosts, whose
+  machine QLSM does not own, so only the name inside QLSM, the inventory file
+  and the config folder change. Ignored for cloud hosts: QLSM provisioned the
+  machine, so its hostname always follows (treated as `true`).
+
+When the name changes, the database row is updated at once and a rename task is
+queued under the host lock. The task sets the host to `active` when it
+finishes, or `error` (with the reason in the host logs) when a step fails.
+Sending the current name succeeds without queuing anything.
+
+Success response (`200 OK`):
+
+```json
+{
+  "message": "Host renamed from 'old-host-name' to 'new-host-name'. Inventory update task queued.",
+  "data": { "id": 1, "name": "new-host-name", "...": "..." }
+}
+```
+
+Error responses:
+
+- `400` for a missing body, an invalid name, or a non-boolean `apply_to_machine`.
+- `404` when the host does not exist.
+- `409` when the name is taken or another operation holds the host lock (the name is reverted).
+- `500` when the rename task cannot be queued (the name is reverted).
 
 ### Create Host Request
 Cloud provider:
@@ -290,7 +420,7 @@ Self provider:
 
 Self hosts create a standalone-style host record on the same physical machine that runs the Docker stack. Only one self host may exist. During creation, QLSM snapshots local OS detection into `Host.os_type` when available; if detection fails, `os_type` remains `null`.
 
-All three provider payloads above accept an optional `runtime` field: `"minqlx"` (default) or `"minqlxtended"`. It is rejected with `400` if present and not one of those two values, and it is **immutable** — there is no field or endpoint to change it after the host is created. For cloud hosts, `runtime` also selects the Terraform OS image (minqlx provisions Debian 12; minqlxtended provisions Ubuntu 24.04, the only image with the Python 3.12 the build links against).
+All three provider payloads above accept an optional `runtime` field: `"minqlx"` (default) or `"minqlxtended"`. It is rejected with `400` if present and not one of those two values, and it is set at creation. The only way to change it afterwards is the minqlx → minqlxtended [Runtime Upgrade](#runtime-upgrade); there is no downgrade. For cloud hosts, a new host of either runtime is provisioned on Ubuntu 24.04 (minqlxtended needs the Python 3.12 the build links against, and a minqlx host on Ubuntu 24.04 can later be upgraded to minqlxtended). minqlx cloud hosts created before v1.53.0 are Debian 12 and stay that way.
 
 The Python 3.12 floor for `runtime: "minqlxtended"` is enforced differently per provider, because QLSM doesn't have the same evidence available at creation time for each:
 
@@ -393,6 +523,7 @@ Example success response:
     "ssh_user": "ansible",
     "ssh_port": 22,
     "os_type": "debian",
+    "os_version": "12",
     "runtime": "minqlx",
     "is_standalone": false,
     "timezone": "America/New_York",
@@ -421,7 +552,9 @@ Example success response:
 
 `firewall_pool_v2: false` means the host's firewall allow-list was rendered before the game/RCON port pool was widened, so the higher instance slots may not be reachable. A successful host setup run — initial or "Re-run Host Setup" — sets it to `true`.
 
-`runtime` is `"minqlx"` or `"minqlxtended"`, set at creation and never changed afterward. `NULL`/legacy rows normalize to `"minqlx"`.
+`runtime` is `"minqlx"` or `"minqlxtended"`, set at creation and changed afterwards only by the minqlx → minqlxtended [Runtime Upgrade](#runtime-upgrade). `NULL`/legacy rows normalize to `"minqlx"`.
+
+`os_version` is the host's `/etc/os-release` `VERSION_ID` (e.g. `"24.04"`), or `null` when unknown. Hosts created before this field existed are filled in by a background task that `GET /api/hosts/` starts for ACTIVE hosts (at most once per host per hour; self deployments get it after updating with `qlsm-install.sh --update`), so the value appears on a later request.
 
 ## Instances
 
@@ -641,7 +774,7 @@ lock and return `200` immediately.
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/server-status` | GET | Live status map keyed by instance ID |
-| `/server-status/workshop-preview/<workshop_id>` | GET | Resolve Steam workshop preview URL (cached) |
+| `/server-status/workshop-preview/<workshop_id>` | GET | Resolve Steam workshop item preview (thumbnail, title, description; cached) |
 
 ### Server Status Response
 ```json
@@ -665,11 +798,15 @@ lock and return `200` immediately.
 {
   "data": {
     "workshop_id": "2358556636",
+    "found": true,
     "preview_url": "https://images.steamusercontent.com/ugc/...",
+    "title": "Campgrounds Redux",
+    "description": "Plain-text description, BBCode stripped, cut to 300 characters plus an ellipsis",
     "source": "cache"
   }
 }
 ```
+Unknown items and Steam failures return "found": false with null fields (cached for 30 minutes).
 
 ## Draft Workspaces
 
@@ -1199,22 +1336,27 @@ All entries are lists of `{"steam_id64": "76561198...", "level": 0-5}`, de-dupli
 
 A failed write (SSH or Redis unreachable) appends a warning to the instance log; the deploy or apply itself still succeeds. The write also deletes any `minqlx:qlsm:managed_admins*` keys left behind by older QLSM versions.
 
-## Plugin Repositories
+## Repositories
 
-External sources of plugins, fetched over HTTP and downloaded into the shared plugin pool (`ql-assets/data/<runtime>-plugins/`). See `ui/plugin_repositories.py`.
+External sources of plugins and addons, fetched over HTTP. Plugins are downloaded into the operator tier of the shared plugin pool (`data/shared-plugins/<runtime>/`, a bind-mounted folder every container sees); a download never modifies the built-in tier in `ql-assets/`; with `overwrite: true` it writes an operator copy that shadows a bundled plugin of the same name. Addon `.zip` packages install into `ADDON_PACKAGES_DIR` through the same installer as an upload. See `ui/plugin_repositories.py` and `ui/plugin_pool.py`.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/plugin-repositories/` | GET | List repositories with their last-synced plugin list |
+| `/plugin-repositories/` | GET | List repositories with their last-synced plugin and addon lists |
 | `/plugin-repositories/` | POST | Add a repository (`name`, `url`) and sync it immediately |
-| `/plugin-repositories/<id>/sync` | POST | Re-fetch `<url>/qlsm-plugins.json` |
-| `/plugin-repositories/<id>` | DELETE | Remove the repository (downloaded files stay) |
-| `/plugin-repositories/<id>/download` | POST | Download `filenames` into the pool; optional `runtimes` ({filename: runtime}) fills in entries that declare none, and `overwrite: true` replaces existing pool files |
+| `/plugin-repositories/<id>/sync` | POST | Re-fetch `<url>/qlsm-repository.json` (falling back to the legacy `<url>/qlsm-plugins.json`) |
+| `/plugin-repositories/<id>` | DELETE | Remove the repository (downloaded files and installed addons stay) |
+| `/plugin-repositories/<id>/download` | POST | Download `filenames` into the pool; optional `runtimes` ({filename: runtime}) fills in entries that declare none, and `overwrite: true` replaces existing pool files. Each downloaded file's runtime gets a common-pool refresh queued on every Active host of that runtime. |
+| `/plugin-repositories/<id>/diff` | GET | `filename` (and `runtime` when the entry declares none): `{data: {filename, runtime, local, remote}}`, the pool copy and the repository copy as text |
+| `/plugin-repositories/<id>/install-addon` | POST | Download and install the addon `id` from the repo's manifest (verifying its declared `sha256`, when present) into `ADDON_PACKAGES_DIR`, same as a zip upload; the addon is `pending_restart` until QLSM restarts. 422 on any fetch/verify/install failure |
+| `/plugin-repositories/updates` | GET | Local-only update status per synced entry: plugins by pool-file hash vs the manifest's `sha256` (LF-normalized), addons by installed `qlsm-addon.json` version vs the manifest's `version`. Statuses: `update_available`, `up_to_date`, `not_installed`, `unknown` |
 
 - A `github.com` repository URL is resolved to its `raw.githubusercontent.com` base on add (trying `main`, then `master`, unless the URL names a branch). `url` in responses is what the operator typed; `fetch_url` is what QLSM fetches.
 - Names are unique ignoring case, and a URL cannot be added twice in either form.
-- Download responses are `{downloaded: [...], errors: [{filename, error, code}]}` with 200 (all fine), 207 (partial) or 502 (none). `code: "exists"` means the pool already has that filename.
+- Download responses are `{downloaded: [...], errors: [{filename, error, code}]}` with 200 (all fine), 207 (partial), 409 (none, every file already exists) or 422 (none, other failures). A failed sync returns 422. Neither route uses 502, because Cloudflare replaces 502 bodies with its own error page. `code: "exists"` means the pool already has that filename.
+- Diff returns 400 (unsafe filename, no runtime), 404 (unknown repository, file not in the pool) or 422 (repository copy can't be fetched, pool file over the size limit). It never writes anything.
 - A `qlsm-plugins.json` entry may carry `cvars`/`commands` (the `.ql-plugin.json` shape). Download re-fetches the manifest (falling back to the last-synced list) and writes the entry's `label`/`description`/`cvars`/`commands` as the pool's `<plugin>.ql-plugin.json`. A separate `<plugin>.ql-plugin.json` in the repo takes precedence; an inline block over 16 KB is skipped.
+  When `downloaded` is non-empty the body also carries `push: {queued: [{id, name}], skipped: [{id, name, reason}]}`. `reason` is `busy` (another job holds the host lock), `status: <HostStatus>` (host not Active), `lock unavailable` (the lock could not be taken, e.g. Redis is down) or `enqueue failed`. A host that cannot take the push is always reported here; the download itself still succeeds. Each queued host runs the same job as `POST /hosts/<id>/plugin-updates/apply` with `update_common_pool: true` (see `ui/plugin_push.py`).
 
 ## Cvar Catalog
 
@@ -1227,6 +1369,61 @@ The engine cvars and console commands the config editor's autocomplete is built 
 - **Revalidate with `ETag`.** The response carries an `ETag` (sha1 of the file) and `Cache-Control: no-cache`. Send it back as `If-None-Match` to get a `304` with an empty body; a client that ignores this re-downloads ~103 KB on every editor open.
 - `qlx_*` plugin cvars are deliberately **not** in this catalog — those come from the plugin manifests of the server being edited (`ui/plugin_manifest.py`).
 - A missing or unreadable catalog file returns an empty catalog (`version: 0`, `etag: "empty"`) rather than an error, so autocomplete degrades to plugin cvars instead of breaking the editor.
+
+## Notifications
+
+Stored notifications shown under the bell in the navbar. Core and addons write them (`ctx.notify`, see the [addon guide](../addons/README.md)); the API only lists them and records that they were read. All three endpoints require authentication, like the rest of the API.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/notifications` | GET | Newest first (by `updated_at`). `?limit=` is clamped to 1-100 (default 20, an unparsable value falls back to it); `?unread=1` limits the list to unread rows |
+| `/notifications/<id>/read` | POST | Mark one notification read. Idempotent; `404` if it does not exist |
+| `/notifications/read-all` | POST | Mark every unread notification read: `{data: {updated}}` |
+
+### List Notifications Response
+
+```json
+{
+  "data": {
+    "notifications": [
+      {
+        "id": 7,
+        "source": "core",
+        "severity": "warning",
+        "title": "Host germany is slow",
+        "body": "",
+        "link": "/servers",
+        "key": "host-slow:3",
+        "created_at": "2026-10-15T09:00:00.000000",
+        "updated_at": "2026-10-15T09:10:00.000000",
+        "resolved_at": null,
+        "read_at": null
+      }
+    ],
+    "unread_count": 1
+  }
+}
+```
+
+- `unread_count` is the total number of unread rows, whatever `limit` and `unread` say, so a client can poll with `limit=1`. It includes resolved-but-unread rows: a condition that has already cleared still counts until someone reads it.
+- Read state is shared by all users: reading a notification, or all of them, clears it for everyone.
+- `severity` is `info`, `warning` or `critical`; `source` is `core` or an addon id. `link`, when set, is an in-app path.
+- Rows are deleted 30 days after their last update.
+
+## System
+
+qlsm's own process, not the servers it manages. Used to activate addons: they register during `create_app()`, and Flask cannot hot-add a blueprint to a live app, so an addon installed at runtime stays `pending_restart` until the process builds the app again.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/system/info` | GET | `{data: {restart_supported, boot_id}}` — whether this deployment can be restarted from the UI, and an id unique to the answering process |
+| `/system/restart` | POST | Ask every qlsm app process to come back on freshly loaded code (`202`) |
+
+- **How it works.** The endpoint only touches a stamp file (`QLSM_RESTART_STAMP`, default `/app/data/.restart-stamp`). `restart-watcher.sh`, started in the background by `entrypoint.sh`, polls it in every app container and signals its own PID 1: `SIGHUP` for web (gunicorn replaces its worker, the container keeps running), `SIGTERM` for worker and poller (warm shutdown, then `restart: unless-stopped` brings them back). `./data` is bind-mounted into all app containers, so one stamp reaches all of them — no control channel, no subscriber code per service, and no `docker.sock` in the web container (see `addons/TRUST.md`).
+- **Not everywhere.** `restart_supported` is false unless `entrypoint.sh` set `QLSM_SUPERVISED=1`, i.e. unless something will actually restart the process. Under `run-dev.sh` the endpoint answers `409` and the UI hides the button, because a restart there would just end qlsm.
+- **Knowing it is back.** The UI reads `boot_id` before requesting a restart and polls `/system/info` until it changes, each poll with a 4 s timeout. Any answer alone proves nothing: the worker being replaced keeps answering for a moment, and a request caught between the old worker exiting and the new one starting may never be answered.
+- **No watcher for rcon**: `python -m rcon_service` never calls `create_app()`, so addons do not live there.
+- Equivalent by hand on the Docker host: `touch data/.restart-stamp`.
 
 ## Settings
 

@@ -48,6 +48,11 @@
         "path": "/docs/operations/check-for-updates.md"
       },
       {
+        "id": "plugin-repositories",
+        "title": "Plugin Repositories",
+        "path": "/docs/operations/plugin-repositories.md"
+      },
+      {
         "id": "watchdog",
         "title": "Configure Watchdog",
         "path": "/docs/operations/watchdog.md"
@@ -111,6 +116,11 @@
         "id": "99k-lan-rate",
         "title": "99k LAN Rate",
         "path": "/docs/features/99k-lan-rate.md"
+      },
+      {
+        "id": "cpu-affinity",
+        "title": "CPU Affinity",
+        "path": "/docs/features/cpu-affinity.md"
       },
       {
         "id": "hooks",

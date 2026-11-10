@@ -24,7 +24,19 @@ cd "$script_dir"
 log "Setting up QLSM worktree at $script_dir"
 
 require_command git
-require_command python3
+
+# The app needs Python >= 3.10 (PEP 604 unions); CI and the Dockerfile use 3.12.
+# Prefer a versioned interpreter so a stale system python3 (macOS ships 3.9)
+# doesn't silently build an unusable venv.
+python_bin=""
+for candidate in python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" >/dev/null 2>&1 \
+        && "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+        python_bin="$candidate"
+        break
+    fi
+done
+[[ -n "$python_bin" ]] || die "Python 3.10+ is required (3.12 recommended); none found on PATH."
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     die "Run this script from inside a QLSM git worktree."
@@ -47,7 +59,9 @@ if [[ -n "$source_worktree" && "$source_worktree" != "$script_dir" ]]; then
     if [[ -d "$source_worktree/configs" ]]; then
         log "Copying missing local configs from $source_worktree"
         mkdir -p configs
-        cp -an "$source_worktree/configs/." configs/
+        # -n exits non-zero on macOS and newer GNU cp when it skips an existing
+        # file, which is the normal case here; don't let set -e abort on it.
+        cp -an "$source_worktree/configs/." configs/ || true
     fi
 
     if [[ ! -e CLAUDE.md && -f "$source_worktree/CLAUDE.md" ]]; then
@@ -85,7 +99,7 @@ export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 
 if [[ ! -d .venv ]]; then
     log "Creating Python virtual environment."
-    python3 -m venv .venv
+    "$python_bin" -m venv .venv
 else
     log ".venv already exists."
 fi
@@ -161,12 +175,24 @@ log "Syncing built-in presets."
 python -m flask sync-builtin-presets
 
 if [[ "$first_run" -eq 1 ]]; then
+    log "Seeding default plugin repositories."
+    python -m flask seed-plugin-repositories || warn "Seeding plugin repositories failed (needs network); run 'flask seed-plugin-repositories' later."
     default_admin_user="${DEFAULT_ADMIN_USER:-admin}"
     log "Creating default admin user '$default_admin_user' with password 'admin'."
     if ! python -m flask create-default-admin "$default_admin_user"; then
         warn "Could not create default admin user. It may already exist."
     fi
-    warn "Default credentials are $default_admin_user/admin; change the password after first login."
+    log "Clearing forced password-change flag for dev convenience (no change-password modal on login)."
+    python -c "
+from ui import create_app, db
+from ui.models import User
+app = create_app()
+with app.app_context():
+    user = User.query.filter_by(username='${default_admin_user}').first()
+    if user and user.password_change_required:
+        user.password_change_required = False
+        db.session.commit()
+"
 fi
 
 log "Worktree setup complete. Run ./run-dev.sh to start development services."

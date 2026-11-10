@@ -333,15 +333,64 @@ function InstanceDetailsModal({ instanceId, isOpen, onClose, onInstanceDeleted, 
                         </Field>
                         <Field label="Port"><span className="font-mono">{instance.port}</span></Field>
                         <Field label="Redis DB"><span className="font-mono">{effectiveRedisDb(instance)}</span></Field>
-                        <Field label="CPU Affinity"><span className="font-mono">{cpuAffinityLabel}</span></Field>
+                        <Field
+                          label={(
+                            <span className="inline-flex items-center gap-1.5">
+                              <span>CPU Affinity</span>
+                              <InfoTooltip
+                                testId="cpu-affinity-tooltip"
+                                size={13}
+                                text={(
+                                  <span className="block space-y-1.5">
+                                    <span className="block">
+                                      Pins this server to one CPU core on its host so the OS doesn&apos;t move it between cores. This keeps frame timing steadier and spreads instances across cores. QLSM assigns the core automatically; &quot;Automatic&quot; means no core is pinned.
+                                    </span>
+                                    <a
+                                      href="/docs/features/cpu-affinity"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="block underline"
+                                      style={{ color: 'var(--accent-info)' }}
+                                    >
+                                      Learn more
+                                    </a>
+                                  </span>
+                                )}
+                              />
+                            </span>
+                          )}
+                        >
+                          <span className="font-mono">{cpuAffinityLabel}</span>
+                        </Field>
                         <Field label="Hostname">{instance.hostname || 'N/A'}</Field>
                         <Field label="Status"><StatusIndicator status={instance.status} /></Field>
                         <Field
                           label={(
                             <span className="inline-flex items-center gap-1.5">
                               <span>99k LAN Rate</span>
-                              {lanRateUnsupportedReason && (
+                              {lanRateUnsupportedReason ? (
                                 <InfoTooltip text={lanRateUnsupportedReason} variant={lanRateForcedOn ? 'info' : 'danger'} size={13} />
+                              ) : (
+                                <InfoTooltip
+                                  testId="lan-rate-info-tooltip"
+                                  size={13}
+                                  text={(
+                                    <span className="block space-y-1.5">
+                                      <span className="block">
+                                        Forces rate 99999 for all clients via a small LD_PRELOAD patch (force_rate.so). Little difference on small servers, big on 8+ player games, and it helps players with higher ping.
+                                      </span>
+                                      <a
+                                        href="/docs/features/99k-lan-rate"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="block underline"
+                                        style={{ color: 'var(--accent-info)' }}
+                                      >
+                                        Learn more
+                                      </a>
+                                    </span>
+                                  )}
+                                />
                               )}
                             </span>
                           )}
@@ -363,7 +412,33 @@ function InstanceDetailsModal({ instanceId, isOpen, onClose, onInstanceDeleted, 
                             </div>
                           </div>
                         </Field>
-                        <Field label="LD_PRELOAD Hooks">
+                        <Field
+                          label={(
+                            <span className="inline-flex items-center gap-1.5">
+                              <span>LD_PRELOAD Hooks</span>
+                              <InfoTooltip
+                                testId="hooks-tooltip"
+                                size={13}
+                                text={(
+                                  <span className="block space-y-1.5">
+                                    <span className="block">
+                                      Native libraries loaded into the server process, in the order shown. System hooks are managed by QLSM.
+                                    </span>
+                                    <a
+                                      href="/docs/features/hooks"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="block underline"
+                                      style={{ color: 'var(--accent-info)' }}
+                                    >
+                                      Learn more
+                                    </a>
+                                  </span>
+                                )}
+                              />
+                            </span>
+                          )}
+                        >
                           {(() => {
                             const hooks = instance.ld_preload_hooks
                               ?.split(',').map(h => h.trim()).filter(Boolean) ?? [];

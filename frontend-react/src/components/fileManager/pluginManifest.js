@@ -29,10 +29,12 @@ export function getPluginManifest(item) {
     : null;
 }
 
-export function getPluginDisplayLabel(item) {
-  const manifest = getPluginManifest(item);
-  const label = manifest?.label;
-  return typeof label === 'string' && label.trim() ? label.trim() : item?.name;
+// The friendly name from the manifest, or null. The config editor always
+// lists plugins by filename (that is what qlx_plugins holds); the label only
+// shows up in the row's info tooltip and on the plugin repository page.
+export function getPluginLabel(item) {
+  const label = getPluginManifest(item)?.label;
+  return typeof label === 'string' && label.trim() ? label.trim() : null;
 }
 
 export function getPluginDescription(item) {
@@ -124,7 +126,7 @@ export function collectPluginCvars(tree = [], checkedPaths = []) {
     }
     const path = node.path || node.name || '';
     if (!path.endsWith('.py')) return;
-    const label = getPluginDisplayLabel(node);
+    const pluginName = node.name || path;
     const enabled = checked.has(path);
     getPluginCvars(node).forEach((entry) => {
       const key = entry.cvar.toLowerCase();
@@ -132,11 +134,11 @@ export function collectPluginCvars(tree = [], checkedPaths = []) {
       // since that is the one actually reading it on this server.
       const existing = seen.has(key) ? collected.find(c => c.cvar.toLowerCase() === key) : null;
       if (existing) {
-        if (enabled && !existing.enabled) Object.assign(existing, entry, { plugin: label, enabled });
+        if (enabled && !existing.enabled) Object.assign(existing, entry, { plugin: pluginName, enabled });
         return;
       }
       seen.add(key);
-      collected.push({ ...entry, plugin: label, enabled });
+      collected.push({ ...entry, plugin: pluginName, enabled });
     });
   };
   (tree || []).forEach(walk);

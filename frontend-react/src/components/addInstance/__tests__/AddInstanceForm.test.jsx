@@ -57,6 +57,15 @@ vi.mock('../../../services/api', () => ({
   getPresets: mocks.getPresets,
   savePreset: mocks.savePreset,
   updatePreset: mocks.updatePreset,
+  checkPluginUpdates: vi.fn().mockRejectedValue(new Error('offline')),
+  applyPluginUpdates: vi.fn(),
+}));
+
+vi.mock('../../NotificationProvider', () => ({
+  useNotification: () => ({
+    showError: vi.fn(),
+    showSuccess: vi.fn(),
+  }),
 }));
 
 vi.mock('../../../services/draftApi', () => ({
@@ -79,8 +88,8 @@ vi.mock('../../fileManager', () => ({
     allowedExtensions: ['.factories'],
     protectedFiles: [],
   },
-  getPluginDisplayLabel: (item) => item?.name,
   PluginCvarsModal: () => null,
+  useUploadBusy: () => ({ uploading: false, track: () => () => {} }),
   FileManager: React.forwardRef(function MockFileManager(props, ref) {
     mocks.fileManagerProps.push(props);
     React.useImperativeHandle(ref, () => ({
@@ -195,7 +204,9 @@ vi.mock('../../fileManager', () => ({
 
 vi.mock('../InstanceBasicInfoForm', () => ({
   default: ({
+    hostname,
     onHostChange,
+    onHostnameChange,
     onPortChange,
     onRedisDbChange,
     port,
@@ -204,6 +215,9 @@ vi.mock('../InstanceBasicInfoForm', () => ({
   }) => (
     <div>
       <div>basic-info</div>
+      <div data-testid="hostname">{hostname}</div>
+      <button type="button" onClick={() => onHostnameChange({ target: { value: 'My Server' } })}>Type Hostname</button>
+      <button type="button" onClick={() => onHostnameChange({ target: { value: 'Default Name' } })}>Type Default Hostname</button>
       <div data-testid="selected-host">{selectedHostId || 'none'}</div>
       <div data-testid="port">{port || 'none'}</div>
       <div data-testid="redis-db">{redisDb ?? 'none'}</div>
@@ -584,6 +598,90 @@ describe('AddInstanceForm draft lifecycle', () => {
 
     await waitFor(() => expect(mocks.getPresetById).toHaveBeenCalledWith(1, { targetRuntime: null }));
     await waitFor(() => expect(screen.getByTestId('lan-rate-enabled')).toHaveTextContent('true'));
+  });
+
+  const renderWithNamedDefault = (onSubmit = vi.fn()) => render(
+    <AddInstanceForm
+      initialData={{
+        hosts: [{ id: 1, name: 'deb-host', os_type: 'debian' }],
+        presets: [],
+        defaultConfigContents: {
+          'server.cfg': 'set sv_hostname "Default Name"',
+          'mappool.txt': '',
+          'access.txt': '',
+          'workshop.txt': '',
+        },
+      }}
+      initialHostId={1}
+      onSubmit={onSubmit}
+      onCancel={vi.fn()}
+      isLoadingSubmit={false}
+      formError={null}
+      onServerCfgLintStatusChange={vi.fn()}
+      onDirtyStateChange={vi.fn()}
+    />
+  );
+
+  it('keeps a typed hostname when a preset is loaded, also on a second load', async () => {
+    mocks.getPresetById.mockResolvedValue({
+      name: 'named-preset',
+      configs: { 'server.cfg': 'set sv_hostname "Preset Server"\nset g_motd "from preset"' },
+      factories: {},
+    });
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    renderWithNamedDefault(onSubmit);
+
+    await waitFor(() => expect(screen.getByTestId('hostname')).toHaveTextContent('Default Name'));
+    fireEvent.click(screen.getByRole('button', { name: /type hostname/i }));
+    expect(screen.getByTestId('hostname')).toHaveTextContent('My Server');
+
+    for (let load = 1; load <= 2; load += 1) {
+      fireEvent.click(screen.getByRole('button', { name: /load preset/i }));
+      fireEvent.click(screen.getByRole('button', { name: /confirm load preset/i }));
+      await waitFor(() => expect(mocks.getPresetById).toHaveBeenCalledTimes(load));
+      await waitFor(() => expect(screen.queryByTestId('preset-manager')).not.toBeInTheDocument());
+      expect(screen.getByTestId('hostname')).toHaveTextContent('My Server');
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: /create instance/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const submitted = onSubmit.mock.calls[0][0];
+    expect(submitted.hostname).toBe('My Server');
+    expect(submitted.configs['server.cfg']).toBe('set sv_hostname "My Server"\nset g_motd "from preset"');
+  });
+
+  it('keeps a typed hostname that equals the one the form filled in', async () => {
+    mocks.getPresetById.mockResolvedValue({
+      name: 'named-preset',
+      configs: { 'server.cfg': 'set sv_hostname "Preset Server"' },
+      factories: {},
+    });
+    renderWithNamedDefault();
+
+    await waitFor(() => expect(screen.getByTestId('hostname')).toHaveTextContent('Default Name'));
+    fireEvent.click(screen.getByRole('button', { name: /type default hostname/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /load preset/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm load preset/i }));
+    await waitFor(() => expect(mocks.getPresetById).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('preset-manager')).not.toBeInTheDocument());
+
+    expect(screen.getByTestId('hostname')).toHaveTextContent('Default Name');
+  });
+
+  it('takes the preset hostname when the field was not typed in', async () => {
+    mocks.getPresetById.mockResolvedValue({
+      name: 'named-preset',
+      configs: { 'server.cfg': 'set sv_hostname "Preset Server"' },
+      factories: {},
+    });
+    renderWithNamedDefault();
+
+    await waitFor(() => expect(screen.getByTestId('hostname')).toHaveTextContent('Default Name'));
+    fireEvent.click(screen.getByRole('button', { name: /load preset/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm load preset/i }));
+
+    await waitFor(() => expect(screen.getByTestId('hostname')).toHaveTextContent('Preset Server'));
   });
 
   it('does not enable lan rate from a preset on an unsupported host', async () => {

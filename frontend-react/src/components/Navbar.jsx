@@ -2,8 +2,12 @@ import { Fragment } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Menu, Transition } from '@headlessui/react';
 import ThemeToggleButton from './ThemeToggleButton';
+import RestartQlsmNavButton from './system/RestartQlsmNavButton';
+import NotificationBell from './NotificationBell';
 import { useAuth } from '../contexts/AuthContext';
-import { Settings, Users, ChevronDown, Terminal, LogOut, Server, SlidersHorizontal, Menu as MenuIcon, BookOpen, Archive, ShieldCheck, FileText, PackagePlus } from 'lucide-react';
+import { useAddonMounts } from '../contexts/AddonsContext';
+import { resolveAddonIcon } from './addons/addonIcons';
+import { Settings, Users, ChevronDown, Terminal, LogOut, Server, SlidersHorizontal, Menu as MenuIcon, BookOpen, Archive, ShieldCheck, FileText, PackagePlus, Puzzle } from 'lucide-react';
 
 function Navbar() {
   const navigate = useNavigate();
@@ -15,6 +19,15 @@ function Navbar() {
     await logoutContext();
     navigate('/login');
   };
+
+  // Addon pages that asked for a navbar entry. The mount list already leaves
+  // out addons that are disabled, broken or too new for this core.
+  const addonNavEntries = useAddonMounts('page')
+    .filter(({ entry }) => entry.nav)
+    .sort((a, b) => a.addon.id.localeCompare(b.addon.id));
+  const isAddonPageActive = (addonId) => (
+    location.pathname === `/addons/${addonId}` || location.pathname.startsWith(`/addons/${addonId}/`)
+  );
 
   const isActive = (path) => {
     if (path === '') return location.pathname === '/';
@@ -126,7 +139,18 @@ function Navbar() {
                           className={`navbar-dropdown-item ${active ? 'navbar-dropdown-item-active' : ''}`}
                         >
                           <PackagePlus size={16} strokeWidth={2} />
-                          <span>Plugin Repositories</span>
+                          <span>Repositories</span>
+                        </Link>
+                      )}
+                    </Menu.Item>
+                    <Menu.Item>
+                      {({ active }) => (
+                        <Link
+                          to="/addons"
+                          className={`navbar-dropdown-item ${active || location.pathname.startsWith('/addons') ? 'navbar-dropdown-item-active' : ''}`}
+                        >
+                          <Puzzle size={16} strokeWidth={2} />
+                          <span>Addons</span>
                         </Link>
                       )}
                     </Menu.Item>
@@ -167,6 +191,20 @@ function Navbar() {
                 </Menu.Items>
               </Transition>
             </Menu>
+
+            {addonNavEntries.map(({ key, addon, entry }) => {
+              const NavIcon = resolveAddonIcon(entry.nav.icon || entry.icon || addon.ui?.icon);
+              return (
+                <Link
+                  key={key}
+                  to={`/addons/${addon.id}`}
+                  className={`navbar-nav-link ${isAddonPageActive(addon.id) ? 'navbar-nav-link-active' : ''}`}
+                >
+                  <NavIcon size={16} strokeWidth={2} />
+                  <span>{entry.nav.label.toUpperCase()}</span>
+                </Link>
+              );
+            })}
           </div>
         )}
 
@@ -252,7 +290,18 @@ function Navbar() {
                           className={`navbar-dropdown-item ${active || location.pathname === '/settings/plugin-repositories' ? 'navbar-dropdown-item-active' : ''}`}
                         >
                           <PackagePlus size={16} strokeWidth={2} />
-                          <span>Plugin Repositories</span>
+                          <span>Repositories</span>
+                        </Link>
+                      )}
+                    </Menu.Item>
+                    <Menu.Item>
+                      {({ active }) => (
+                        <Link
+                          to="/addons"
+                          className={`navbar-dropdown-item ${active || location.pathname.startsWith('/addons') ? 'navbar-dropdown-item-active' : ''}`}
+                        >
+                          <Puzzle size={16} strokeWidth={2} />
+                          <span>Addons</span>
                         </Link>
                       )}
                     </Menu.Item>
@@ -289,6 +338,22 @@ function Navbar() {
                         </Link>
                       )}
                     </Menu.Item>
+                    {addonNavEntries.map(({ key, addon, entry }) => {
+                      const NavIcon = resolveAddonIcon(entry.nav.icon || entry.icon || addon.ui?.icon);
+                      return (
+                        <Menu.Item key={key}>
+                          {({ active }) => (
+                            <Link
+                              to={`/addons/${addon.id}`}
+                              className={`navbar-dropdown-item ${active || isAddonPageActive(addon.id) ? 'navbar-dropdown-item-active' : ''}`}
+                            >
+                              <NavIcon size={16} strokeWidth={2} />
+                              <span>{entry.nav.label}</span>
+                            </Link>
+                          )}
+                        </Menu.Item>
+                      );
+                    })}
                     <Menu.Item>
                       {({ active }) => (
                         <button
@@ -306,6 +371,10 @@ function Navbar() {
               </Transition>
             </Menu>
           )}
+
+          {isAuthenticated && !passwordChangeRequired && <RestartQlsmNavButton />}
+
+          {isAuthenticated && !passwordChangeRequired && <NotificationBell />}
 
           {isAuthenticated ? (
             <button onClick={handleLogout} className="navbar-logout-btn">

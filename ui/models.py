@@ -5,6 +5,7 @@ import secrets
 from werkzeug.security import generate_password_hash, check_password_hash
 from . import db
 from ui.runtime import DEFAULT_RUNTIME, normalize_runtime
+from ui.runtime_upgrade import upgrade_eligibility
 
 class HostStatus(enum.Enum):
     """Enum for Host status."""
@@ -56,15 +57,19 @@ class Host(db.Model):
     ssh_key_path = db.Column(db.String(255), nullable=True) # Path to private key generated/used by Terraform
     ssh_port = db.Column(db.Integer, default=22, nullable=False) # SSH port for connections
     os_type = db.Column(db.String(50), nullable=True) # Detected OS type when known (e.g. 'debian', 'ubuntu')
+    os_version = db.Column(db.String(50), nullable=True) # OS VERSION_ID when known (e.g. '24.04', '12')
     is_standalone = db.Column(db.Boolean, default=False, nullable=False) # True for user-provided servers
     timezone = db.Column(db.String(50), nullable=True) # IANA timezone name (e.g., 'America/New_York')
     cpu_count = db.Column(db.Integer, nullable=True) # Detected/inferred Linux CPU count for affinity assignment
     redis_unix_socket = db.Column(db.Boolean, default=False, nullable=False, server_default='0')
     lan_rate_uses_hook = db.Column(db.Boolean, default=False, nullable=False, server_default='0') # True = LD_PRELOAD hook mechanism; False = legacy iptables/sysctl path
+    # Set by the runtime upgrade once it succeeds: instances created or
+    # redeployed on this host get their own venv, never system pip.
+    runtime_deps_isolated = db.Column(db.Boolean, default=False, nullable=False, server_default='0')
     firewall_pool_v2 = db.Column(db.Boolean, default=False, nullable=False, server_default='0') # True = firewall rendered with the current game/RCON port pool; False = narrower legacy allow-list
     # Which minqlx runtime this host builds and runs. Chosen at creation and
-    # immutable thereafter -- migrating a live host is destructive, and a locked
-    # column can never drift from what is actually installed on the box.
+    # changed only by the Upgrade to minqlxtended action (minqlx -> minqlxtended,
+    # with whole-host rollback), so it can never drift from what is installed.
     runtime = db.Column(db.String(20), nullable=False, default=DEFAULT_RUNTIME,
                         server_default=DEFAULT_RUNTIME)
     status = db.Column(db.Enum(HostStatus), default=HostStatus.PENDING, nullable=False)
@@ -83,11 +88,17 @@ class Host(db.Model):
     def __repr__(self):
         return f'<Host {self.name} ({self.ip_address or "No IP"})>'
 
-    def to_dict(self):
-        """Convert host to dictionary."""
+    def to_dict(self, refresh=True):
+        """Convert host to dictionary.
+
+        refresh=False is for callers that just loaded the row (and its
+        instances) fresh, like the polled hosts list: refreshing would re-query
+        every host and drop its eagerly loaded instances (one query each).
+        """
         # Ensure the instance is refreshed from the database session
         # to get the most up-to-date state, especially for enum fields.
-        db.session.refresh(self)
+        if refresh:
+            db.session.refresh(self)
         return {
             'id': self.id,
             'name': self.name,
@@ -100,6 +111,7 @@ class Host(db.Model):
             'ssh_key_path': self.ssh_key_path,
             'ssh_port': self.ssh_port,
             'os_type': self.os_type,
+            'os_version': self.os_version,
             'is_standalone': self.is_standalone,
             'timezone': self.timezone,
             'cpu_count': self.cpu_count,
@@ -107,6 +119,7 @@ class Host(db.Model):
             'lan_rate_uses_hook': bool(self.lan_rate_uses_hook),
             'firewall_pool_v2': bool(self.firewall_pool_v2),
             'runtime': normalize_runtime(self.runtime),
+            'runtime_upgrade': upgrade_eligibility(self),
             'status': self.status.value if self.status else None,
             'qlfilter_status': self.qlfilter_status.value if self.qlfilter_status else QLFilterStatus.UNKNOWN.value, # Include QLFilter status
             'auto_restart_schedule': self.auto_restart_schedule,
@@ -142,6 +155,8 @@ class QLInstance(db.Model):
     cpu_affinity = db.Column(db.Integer, nullable=True) # Optional Linux CPU index assigned to this service
     redis_db = db.Column(db.Integer, nullable=True)  # Chosen Redis logical DB; NULL = derive from port
     runtime_invocation_id = db.Column(db.String(64), nullable=True)
+    # Isolated dependency venv (runtime upgrade); NULL = the host's system Python.
+    python_deps_path = db.Column(db.String(255), nullable=True)
     status = db.Column(db.Enum(InstanceStatus), default=InstanceStatus.IDLE, nullable=False) # Status of the QL instance itself
     logs = db.Column(db.Text, nullable=True) # Stores logs from background tasks (e.g., Ansible)
     
@@ -330,14 +345,17 @@ class Operator(db.Model):
 
 
 class PluginRepository(db.Model):
-    """An external source of minqlx plugins the operator can browse and pull
-    individual files from into the local pool (ql-assets/data/<runtime>-plugins/).
+    """An external source of minqlx plugins and qlsm addons the operator can
+    browse and install from -- plugin files into the local pool
+    (data/shared-plugins/<runtime>/), addon .zip packages into
+    ADDON_PACKAGES_DIR.
 
-    The manifest is fetched over plain HTTP from `<url>/qlsm-plugins.json`
-    (see ui/plugin_repositories.py) and cached here as-fetched, so browsing
-    the plugin list doesn't need a live request every time -- only "Sync"
-    does. This is a source list, not the pool itself: nothing here is ever
-    read at instance-deploy time.
+    The manifest is fetched over plain HTTP from `<url>/qlsm-repository.json`
+    (falling back to the original `<url>/qlsm-plugins.json`, see
+    ui/plugin_repositories.py) and cached here as-fetched, so browsing
+    doesn't need a live request every time -- only "Sync" does. This is a
+    source list, not the pool itself: nothing here is ever read at
+    instance-deploy time.
     """
     __tablename__ = 'plugin_repository'
 
@@ -355,18 +373,27 @@ class PluginRepository(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
     def to_dict(self):
-        plugins = []
+        # manifest_json is either the original bare plugin list (rows synced
+        # before addons existed) or {'plugins': [...], 'addons': [...]} --
+        # normalized here so no reader ever sees the difference.
+        plugins, addons = [], []
         if self.manifest_json:
             try:
-                plugins = json.loads(self.manifest_json)
+                cached = json.loads(self.manifest_json)
             except ValueError:
-                plugins = []
+                cached = []
+            if isinstance(cached, dict):
+                plugins = cached.get('plugins') or []
+                addons = cached.get('addons') or []
+            elif isinstance(cached, list):
+                plugins = cached
         return {
             'id': self.id,
             'name': self.name,
             'url': self.display_url or self.url,
             'fetch_url': self.url,
             'plugins': plugins,
+            'addons': addons,
             'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'last_sync_error': self.last_sync_error,
             'created_at': self.created_at.isoformat() if self.created_at else None,
@@ -397,3 +424,126 @@ class BinaryMetadata(db.Model):
             name='uq_bm_context_path',
         ),
     )
+
+
+class AddonScope(enum.Enum):
+    """The three layers an addon can be configured at.
+
+    An addon is active globally, installed on a host, and switched on per
+    instance, with each layer requiring the one above it.
+    """
+    GLOBAL = 'global'
+    HOST = 'host'
+    INSTANCE = 'instance'
+
+
+class AddonState(db.Model):
+    """Per-(addon, scope, scope_id) enable flag + settings blob.
+
+    One row per place an addon is configured. `scope_id` is the Host.id or
+    QLInstance.id the row belongs to, and is 0 for GLOBAL rows (SQLite treats
+    NULL as distinct in unique constraints, so a sentinel keeps the uniqueness
+    guarantee real for the global row).
+
+    `settings_json` holds the addon's own settings as a JSON object string.
+    It is deliberately opaque to core: the shape is declared by the addon's
+    manifest, validated by ui/addons/settings.py against that manifest, and
+    never interpreted here -- core must not grow knowledge of any specific
+    addon's fields.
+
+    No ForeignKey to host/instance on purpose: one column has to point at two
+    different tables depending on `scope`, which a FK cannot express. Cleanup
+    is therefore explicit, in ui/addons/registry.py's host/instance delete
+    handling, and covered by its own test so it cannot silently rot.
+    """
+    __tablename__ = 'addon_state'
+
+    id = db.Column(db.Integer, primary_key=True)
+    addon_id = db.Column(db.String(64), nullable=False, index=True)
+    scope = db.Column(db.String(16), nullable=False)
+    scope_id = db.Column(db.Integer, nullable=False, default=0, server_default='0')
+    enabled = db.Column(db.Boolean, nullable=False, default=False, server_default='0')
+    settings_json = db.Column(db.Text, nullable=False, default='{}', server_default='{}')
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'addon_id',
+            'scope',
+            'scope_id',
+            name='uq_addon_state_scope',
+        ),
+    )
+
+    @property
+    def settings(self):
+        """Parsed settings dict. A corrupt blob reads as {} rather than raising --
+        one unreadable row must not break the whole addon catalog."""
+        try:
+            value = json.loads(self.settings_json or '{}')
+        except (TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'addon_id': self.addon_id,
+            'scope': self.scope,
+            'scope_id': self.scope_id,
+            'enabled': bool(self.enabled),
+            'settings': self.settings,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Notification(db.Model):
+    """A stored notification shown under the navbar bell.
+
+    Written through ui/notifications.py (core) or ctx.notify() (addons), never
+    directly. `source` is 'core' or the addon id. With a `key`, one open
+    (unresolved) row per (source, key) is kept up to date instead of a new row
+    per report, so a condition that keeps firing never floods the list.
+
+    `updated_at` is the last time the condition was reported and is set only
+    by notify(): marking a row read must not move it to the top of the list,
+    so there is deliberately no onupdate here.
+    """
+    __tablename__ = 'notification'
+
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(64), nullable=False)
+    severity = db.Column(db.String(16), nullable=False)
+    title = db.Column(db.String(120), nullable=False)
+    body = db.Column(db.String(1000), nullable=False, default='', server_default='')
+    link = db.Column(db.String(500), nullable=True)
+    key = db.Column(db.String(200), nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    read_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'source': self.source,
+            'severity': self.severity,
+            'title': self.title,
+            'body': self.body,
+            'link': self.link,
+            'key': self.key,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'resolved_at': self.resolved_at.isoformat() if self.resolved_at else None,
+            'read_at': self.read_at.isoformat() if self.read_at else None,
+        }
+
+
+# Imported last: it depends on db only, and must be registered for create_all().
+from ui.models_runtime_upgrade import HostRuntimeUpgradeOperation  # noqa: E402,F401

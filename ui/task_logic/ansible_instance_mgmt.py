@@ -15,7 +15,7 @@ from ui import db
 from ui.constants import resolve_redis_db
 from ui.models import QLInstance, InstanceStatus, Host # Need Host for cleanup path
 from ui.lan_rate_policy import effective_lan_rate
-from ui.runtime import host_runtime, log_filename_pattern, runtime_extravars, runtime_paths
+from ui.runtime import host_runtime, instance_runtime_extravars, log_filename_pattern, runtime_paths
 from .common import append_log # Import from the common module
 from . import service_runtime
 from .ansible_runner import _run_ansible_playbook
@@ -147,10 +147,50 @@ def _build_qlds_args_string(instance):
     ]
 
     user_plugins = [p.strip() for p in instance.qlx_plugins.split(',') if p.strip()] if instance.qlx_plugins else []
-    all_plugins = SYSTEM_PLUGINS + [p for p in user_plugins if p not in SYSTEM_PLUGINS]
+    addon_plugins = [p for p in _addon_contributions('instance.plugins', instance) if p]
+    all_plugins = SYSTEM_PLUGINS + [
+        p for p in user_plugins + addon_plugins if p not in SYSTEM_PLUGINS
+    ]
     parts.append(f'+set qlx_plugins "{", ".join(all_plugins)}"')
 
+    # Addon-contributed cvars go last: the engine takes the last +set for a
+    # cvar, so an addon can add its own but cannot shadow one core depends on
+    # earlier in the list without that being the explicit, visible outcome.
+    parts += [str(arg) for arg in _addon_contributions('instance.launch_args', instance) if arg]
+
     return ' '.join(parts)
+
+
+def _addon_contributions(hook, instance):
+    """Ask enabled addons to contribute to this instance's deploy.
+
+    Returns [] when no addon is installed, enabled, or registered for the
+    hook, so a QLSM with no addons builds byte-identical launch arguments to
+    one without the addon system at all. A handler that raises is logged and
+    skipped inside dispatch() -- an addon must not be able to break a deploy
+    it merely decorates.
+    """
+    try:
+        from ui.addons import dispatch
+
+        return dispatch(hook, instance.id, instance.id) or []
+    except Exception as e:  # registry unavailable, e.g. outside an app context
+        log.warning('Addon hook %s skipped for instance %s: %s', hook, instance.id, e)
+        return []
+
+
+def _addon_cleanup_scope(scope, scope_id):
+    """Run addon cleanup for a host/instance that is being deleted.
+
+    Never raises: a failing addon must not be able to block a delete the
+    operator asked for and leave a half-removed resource behind.
+    """
+    try:
+        from ui.addons import cleanup_scope
+
+        cleanup_scope(scope, scope_id)
+    except Exception as e:
+        log.warning('Addon cleanup for %s %s skipped: %s', scope, scope_id, e)
 
 
 def _build_ld_preload_paths(instance):
@@ -185,6 +225,7 @@ def _build_ld_preload_paths(instance):
                 )
                 continue
             paths.append(f"/home/ql/qlds-{instance.port}/{res['host_subdir']}/{fn}")
+    paths += [str(p) for p in _addon_contributions('instance.ld_preload', instance) if p]
     return ":".join(paths)
 
 
@@ -257,7 +298,7 @@ def deploy_instance_logic(instance_id, admin_levels=None):
             'lan_rate_enabled': instance.lan_rate_enabled # Pass for conditional iptables/sysctl
         }
         deploy_extravars = with_self_host_network_extravars(instance, deploy_extravars)
-        deploy_extravars.update(runtime_extravars(instance.host))
+        deploy_extravars.update(instance_runtime_extravars(instance))
 
         # Pass the instance object directly to the helper
         runner_result, error_msg = _run_ansible_playbook(
@@ -304,6 +345,12 @@ def deploy_instance_logic(instance_id, admin_levels=None):
                 # Add Instance form (or its preset), into the fresh Redis DB.
                 from .access_permission_sync import write_and_report_admin_levels
                 write_and_report_admin_levels(instance, admin_levels)
+                # A fresh instance's server.cfg is on the host too. Addons that
+                # mirror cvars out of it (the telemetry relay's routing table
+                # from qlx_statsHubServerId) must see this exactly as they see
+                # an Apply, or an id typed into the create form never reaches
+                # them.
+                _addon_contributions('instance.config_applied', instance)
                 return f"Instance {instance_id} deployment successful. Status: RUNNING"
 
         # Handle failures (rc != 0 OR (rc == 0 AND no_hosts_matched))
@@ -380,7 +427,7 @@ def restart_instance_logic(instance_id):
             'cpu_affinity': cpu_affinity
         }
         restart_extravars = with_self_host_network_extravars(instance, restart_extravars)
-        restart_extravars.update(runtime_extravars(instance.host))
+        restart_extravars.update(instance_runtime_extravars(instance))
 
         # Pass the instance object directly to the helper
         runner_result, error_msg = _run_ansible_playbook(
@@ -612,7 +659,7 @@ def apply_instance_config_logic(instance_id, restart=True, reconcile_lan_rate_ne
             'restart_service': restart     # Pass restart flag
         }
         apply_config_extravars = with_self_host_network_extravars(instance, apply_config_extravars)
-        apply_config_extravars.update(runtime_extravars(instance.host))
+        apply_config_extravars.update(instance_runtime_extravars(instance))
 
         # Run the new playbook: sync_instance_configs_and_restart.yml
         runner_result, error_msg = _run_ansible_playbook(
@@ -688,6 +735,16 @@ def apply_instance_config_logic(instance_id, restart=True, reconcile_lan_rate_ne
 
             from .access_permission_sync import write_and_report_admin_levels
             write_and_report_admin_levels(instance, admin_levels)
+
+            # Config is on disk and applied. Addons that mirror something out
+            # of server.cfg react here -- e.g. an addon keeping its own
+            # routing state in step with whatever cvars the file actually
+            # carries, including when the operator set them by hand in the
+            # Plugins tab and never used an addon's own assisted flow.
+            # Ungated on purpose: "the config was applied" is a fact, and the
+            # addon decides whether it cares. Gating on the enable flag would
+            # miss exactly the hand-edited case this exists for.
+            _addon_contributions('instance.config_applied', instance)
 
             log.info(f"Finished task apply_instance_config for instance_id: {instance_id}. Status: {final_status.value}")
             return f"Instance {instance_id} config application successful. Status: {final_status.value}"
@@ -800,6 +857,10 @@ def delete_instance_logic(instance_id):
         # Delete instance from DB
         try:
             instance_name_for_log = instance.name # Store name before deleting
+            # Let addons clean up before the row goes: their own handler may
+            # need to read it, and core drops their AddonState rows here too
+            # (no FK cascade -- scope_id points at two different tables).
+            _addon_cleanup_scope('instance', instance.id)
             db.session.delete(instance)
             db.session.commit()
             log.info(f"Finished task delete_instance for instance_id: {instance_id}. Instance record '{instance_name_for_log}' deleted.")
@@ -882,7 +943,7 @@ def reconfigure_instance_lan_rate_logic(instance_id):
             'lan_rate_enabled': instance.lan_rate_enabled
         }
         reconfigure_extravars = with_self_host_network_extravars(instance, reconfigure_extravars)
-        reconfigure_extravars.update(runtime_extravars(instance.host))
+        reconfigure_extravars.update(instance_runtime_extravars(instance))
 
         # Run the LAN rate update playbook
         runner_result, error_msg = _run_ansible_playbook(
